@@ -58,7 +58,7 @@ where
         let packets = PENDING_PACKETS.load(self.app.storage())?;
         packets
             .first_key_value()
-            .map(|(k, _)| k.clone())
+            .map(|(k, _)| *k)
             .ok_or(anyhow!("No pending packets"))
     }
 
@@ -93,14 +93,14 @@ where
 
         match &local.port {
             IbcPort::Contract(contract) => {
-                let code_id = self.app.contract_data(&contract)?.code_id;
+                let code_id = self.app.contract_data(contract)?.code_id;
                 let ibc_details = self
                     .code_ids
                     .get(&code_id)
                     .ok_or(anyhow!("Code ID not found"))?;
                 let msg =
                     IbcChannelOpenMsg::new_init(IbcChannel::new_from_creators(local, remote)?);
-                self.app.use_contract(&contract, |deps, env| {
+                self.app.use_contract(contract, |deps, env| {
                     ibc_details
                         .ibc_channel_open(deps, env, msg)
                         .into_app_response()
@@ -133,13 +133,13 @@ where
 
         match &channel.local.port {
             IbcPort::Contract(contract) => {
-                let code_id = self.app.contract_data(&contract)?.code_id;
+                let code_id = self.app.contract_data(contract)?.code_id;
                 let ibc_details = self
                     .code_ids
                     .get(&code_id)
                     .ok_or(anyhow!("Code ID not found"))?;
 
-                self.app.use_contract(&contract, |deps, env| {
+                self.app.use_contract(contract, |deps, env| {
                     ibc_details
                         .ibc_channel_connect(deps, env, msg)
                         .into_app_response()
@@ -148,7 +148,7 @@ where
             IbcPort::Module(_) => todo!(),
         }
 
-        channel.status.next()?;
+        channel.status.to_next_status()?;
 
         Ok(())
     }
@@ -170,7 +170,7 @@ where
             IbcMsg::Transfer { .. } => bail!("Transfer packet not supported yet"),
             IbcMsg::SendPacket { data, timeout, .. } => match &channel.local.port {
                 IbcPort::Contract(contract) => {
-                    let code_id = self.app.contract_data(&contract)?.code_id;
+                    let code_id = self.app.contract_data(contract)?.code_id;
                     let ibc_details = self
                         .code_ids
                         .get(&code_id)
@@ -189,7 +189,7 @@ where
 
                     let mut ack: Option<Binary> = None;
 
-                    let response = self.app.use_contract(&contract, |deps, env| {
+                    let response = self.app.use_contract(contract, |deps, env| {
                         let res = ibc_details.ibc_packet_receive(deps, env, msg.clone())?;
 
                         if let Some(ack_data) = &res.acknowledgement {
@@ -224,7 +224,7 @@ where
             IbcMsg::Transfer { .. } => todo!(),
             IbcMsg::SendPacket { data, timeout, .. } => match &channel.local.port {
                 IbcPort::Contract(contract) => {
-                    let code_id = self.app.contract_data(&contract)?.code_id;
+                    let code_id = self.app.contract_data(contract)?.code_id;
                     let ibc_details = self
                         .code_ids
                         .get(&code_id)
@@ -242,7 +242,7 @@ where
                         relayer.clone(),
                     );
 
-                    self.app.use_contract(&contract, |deps, env| {
+                    self.app.use_contract(contract, |deps, env| {
                         ibc_details
                             .ibc_packet_ack(deps, env, msg.clone())
                             .into_app_response()

@@ -18,7 +18,6 @@ where
 {
     app_1: IbcApp<BankT1, ApiT1, StorageT1, CustomT1, WasmT1, StakingT1, DistrT1, IbcModule, GovT1, StargateT1>,
     app_2: IbcApp<BankT2, ApiT2, StorageT2, CustomT2, WasmT2, StakingT2, DistrT2, IbcModule, GovT2, StargateT2>,
-    auto_relay: bool
 }
 
 // #[rustfmt::skip]
@@ -112,11 +111,7 @@ where
             StargateT2,
         >,
     ) -> Self {
-        IperApp {
-            app_1,
-            app_2,
-            auto_relay: true,
-        }
+        IperApp { app_1, app_2 }
     }
 
     pub fn store_code_on_1(
@@ -217,7 +212,7 @@ where
             .load(self.app_2.app.storage())
             .unwrap_or_default();
 
-        return (pending_1, pending_2);
+        (pending_1, pending_2)
     }
 
     pub fn channels(

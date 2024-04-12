@@ -25,7 +25,7 @@ fn t1() {
     let mut app = IperApp::new(app_1, app_2);
 
     let contract = MultiContract::new(
-        ContractWrapper::new(mock_1::execute, mock_1::instantiate, mock_1::query).as_contract(),
+        ContractWrapper::new(mock_1::execute, mock_1::instantiate, mock_1::query).to_contract(),
         Some(IbcClosures::new_as_ibc_contract(
             mock_1::ibc_channel_open,
             mock_1::ibc_channel_close,
@@ -39,7 +39,7 @@ fn t1() {
     let code_id_1 = app.store_code_on_1(contract);
 
     let contract = MultiContract::new(
-        ContractWrapper::new(mock_1::execute, mock_1::instantiate, mock_1::query).as_contract(),
+        ContractWrapper::new(mock_1::execute, mock_1::instantiate, mock_1::query).to_contract(),
         Some(IbcClosures::new_as_ibc_contract(
             mock_1::ibc_channel_open,
             mock_1::ibc_channel_close,

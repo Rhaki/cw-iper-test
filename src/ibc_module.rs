@@ -34,11 +34,7 @@ impl Module for IbcModule {
         QueryC: cosmwasm_std::CustomQuery + serde::de::DeserializeOwned + 'static,
     {
         let mut packets = PENDING_PACKETS.load(storage).unwrap_or_default();
-        let new_key = packets
-            .last_key_value()
-            .map(|(k, _)| k.clone())
-            .unwrap_or(0)
-            + 1;
+        let new_key = packets.last_key_value().map(|(k, _)| *k).unwrap_or(0) + 1;
         packets.insert(new_key, msg);
         PENDING_PACKETS.save(storage, &packets)?;
         Ok(AppResponse::default())
@@ -106,7 +102,7 @@ pub enum IbcChannelStatus {
 }
 
 impl IbcChannelStatus {
-    pub fn next(&mut self) -> AppResult<()> {
+    pub fn to_next_status(&mut self) -> AppResult<()> {
         match self {
             IbcChannelStatus::Created => *self = IbcChannelStatus::Opening,
             IbcChannelStatus::Opening => *self = IbcChannelStatus::Connected,

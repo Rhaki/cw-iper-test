@@ -256,7 +256,7 @@ pub trait ContractWrapperExt<
     C: CustomMsg,         // Type of custom message returned from all entry-points except `query`.
     Q: CustomQuery + DeserializeOwned,
 {
-    fn as_contract(self) -> Box<dyn Contract<C, Q>>;
+    fn to_contract(self) -> Box<dyn Contract<C, Q>>;
 }
 
 impl<T1, T2, T3, E1, E2, E3, C, Q, T4, E4, E5, T6, E6>
@@ -277,7 +277,7 @@ where
     C: CustomMsg + 'static, // Type of custom message returned from all entry-points except `query`.
     Q: CustomQuery + DeserializeOwned + 'static, // Type of custom query in querier passed as deps/deps_mut to all entry-points.
 {
-    fn as_contract(self) -> Box<dyn Contract<C, Q>> {
+    fn to_contract(self) -> Box<dyn Contract<C, Q>> {
         Box::new(self) as Box<dyn Contract<C, Q>>
     }
 }

@@ -12,6 +12,8 @@ use crate::ibc_module::IbcModule;
 pub struct IbcAppBuilder {}
 
 impl IbcAppBuilder {
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> AppBuilder<
         BankKeeper,
         MockApi,
