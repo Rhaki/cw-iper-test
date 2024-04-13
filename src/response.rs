@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    to_json_binary, Addr, Binary, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcMsg,
-    IbcReceiveResponse, Response,
+    to_json_binary, Binary, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcMsg, IbcReceiveResponse,
+    Response,
 };
 use cw_multi_test::AppResponse;
 
@@ -8,7 +8,6 @@ use crate::error::AppResult;
 
 #[derive(Debug, Clone)]
 pub struct RelayedResponse {
-    pub relayer: Addr,
     pub msg: IbcMsg,
     pub dest_response: AppResponse,
     pub ack: Option<Binary>,

@@ -7,45 +7,59 @@ use cosmwasm_std::{
     IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::{
-    App, AppResponse, Bank, Distribution, Gov, Ibc, Module, Staking, Stargate, Wasm,
+    transactional, App, AppResponse, Bank, Distribution, Gov, Module, Staking, Stargate, Wasm,
 };
 use serde::de::DeserializeOwned;
 
 use crate::{
-    contracts::IbcContract,
+    contracts::{IbcContract, MultiContract},
     error::AppResult,
-    ibc_module::{
-        IbcChannelCreator, IbcChannelDebuilder, IbcChannelExt, IbcChannelStatus, IbcChannelWrapper,
-        IbcMsgExt, IbcPort, PENDING_PACKETS,
+    ibc::{
+        Channels, IbcChannelCreator, IbcChannelExt, IbcChannelStatus, IbcChannelWrapper, IbcMsgExt,
+        IbcPort,
     },
+    ibc_module::{IbcModule, PENDING_PACKETS},
     response::IntoResponse,
 };
+
+pub type SharedChannels = Rc<RefCell<Channels>>;
 
 pub struct IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
 where
     CustomT: Module,
 {
+    pub relayer: Addr,
+    pub chain_id: String,
     pub app: App<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>,
     pub code_ids: BTreeMap<u64, Box<dyn IbcContract<CustomT::ExecT, CustomT::QueryT>>>,
-    pub channels: BTreeMap<u64, IbcChannelWrapper>,
+    pub channels: SharedChannels,
 }
 
-impl<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
-    IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
+impl<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, GovT, StargateT>
+    IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcModule, GovT, StargateT>
 where
-    BankT: Bank,
-    ApiT: Api,
-    StorageT: Storage,
-    CustomT: Module,
-    WasmT: Wasm<CustomT::ExecT, CustomT::QueryT>,
-    StakingT: Staking,
-    DistrT: Distribution,
-    IbcT: Ibc,
-    GovT: Gov,
-    StargateT: Stargate,
+    BankT: Bank + 'static,
+    ApiT: Api + 'static,
+    StorageT: Storage + 'static,
+    CustomT: Module + 'static,
+    WasmT: Wasm<CustomT::ExecT, CustomT::QueryT> + 'static,
+    StakingT: Staking + 'static,
+    DistrT: Distribution + 'static,
+    GovT: Gov + 'static,
+    StargateT: Stargate + 'static,
     CustomT::ExecT: CustomMsg + DeserializeOwned + 'static,
     CustomT::QueryT: CustomQuery + DeserializeOwned + 'static,
 {
+    pub fn store_ibc_code(
+        &mut self,
+        contract: MultiContract<CustomT::ExecT, CustomT::QueryT>,
+    ) -> u64 {
+        let code_id = self.app.store_code(contract.base);
+        if let Some(ibc) = contract.ibc {
+            self.code_ids.insert(code_id, ibc);
+        }
+        code_id
+    }
     pub fn get_pending_packet(&self, packet_id: u64) -> AppResult<IbcMsg> {
         let packets = PENDING_PACKETS.load(self.app.storage())?;
         packets
@@ -76,14 +90,7 @@ where
         Ok(())
     }
 
-    pub fn get_next_channel_id(&self) -> u64 {
-        self.channels
-            .last_key_value()
-            .map(|(k, _)| k + 1)
-            .unwrap_or(0)
-    }
-
-    pub fn channel_open(
+    pub fn open_channel(
         &mut self,
         local: &IbcChannelCreator,
         remote: &IbcChannelCreator,
@@ -91,6 +98,7 @@ where
     ) -> AppResult<IbcChannelWrapper> {
         let channel_wrapper = IbcChannelWrapper::new(local.clone(), remote.clone(), sequence);
 
+        let msg = IbcChannelOpenMsg::new_init(IbcChannel::new_from_creators(local, remote)?);
         match &local.port {
             IbcPort::Contract(contract) => {
                 let code_id = self.app.contract_data(contract)?.code_id;
@@ -98,28 +106,34 @@ where
                     .code_ids
                     .get(&code_id)
                     .ok_or(anyhow!("Code ID not found"))?;
-                let msg =
-                    IbcChannelOpenMsg::new_init(IbcChannel::new_from_creators(local, remote)?);
+
                 self.app.use_contract(contract, |deps, env| {
                     ibc_details
                         .ibc_channel_open(deps, env, msg)
                         .into_app_response()
                 })?;
             }
-            IbcPort::Module(_) => todo!(),
+            IbcPort::Module(name) => {
+                let (api, store, block, router) = self.app.use_parts();
+
+                transactional(&mut *store, |write_cache, _| {
+                    router
+                        .ibc
+                        .open_channel(&*api, write_cache, router, &*block, name, msg.clone())
+                })?;
+            }
         }
 
         self.channels
-            .insert(channel_wrapper.local.channel_id()?, channel_wrapper.clone());
+            .borrow_mut()
+            .insert(channel_wrapper.local.channel_id()?, channel_wrapper.clone())?;
 
         Ok(channel_wrapper)
     }
 
     pub fn channel_connect(&mut self, channel_id: u64) -> AppResult<()> {
-        let channel = self
-            .channels
-            .get_mut(&channel_id)
-            .ok_or(anyhow!("Channel not found: {}", channel_id))?;
+        let mut channels = self.channels.borrow_mut();
+        let channel = channels.get_mut(channel_id)?;
         let msg = match channel.status {
             IbcChannelStatus::Created => IbcChannelConnectMsg::new_ack(
                 IbcChannel::new_from_creators(&channel.local, &channel.remote)?,
@@ -145,7 +159,20 @@ where
                         .into_app_response()
                 })?;
             }
-            IbcPort::Module(_) => todo!(),
+            IbcPort::Module(name) => {
+                let (api, store, block, router) = self.app.use_parts();
+
+                transactional(&mut *store, |write_cache, _| {
+                    router.ibc.channel_connect(
+                        &*api,
+                        write_cache,
+                        router,
+                        &*block,
+                        name,
+                        msg.clone(),
+                    )
+                })?;
+            }
         }
 
         channel.status.to_next_status()?;
@@ -156,13 +183,11 @@ where
     pub fn packet_receive(
         &mut self,
         msg: &IbcMsg,
-        relayer: &Addr,
         dest_channel_id: u64,
     ) -> AppResult<PacketReceiveResponse> {
-        let channel = self
-            .channels
-            .get_mut(&dest_channel_id)
-            .ok_or(anyhow!("Channel not found: {}", dest_channel_id))?;
+        let mut channels = self.channels.borrow_mut();
+
+        let channel = channels.get_mut(dest_channel_id)?;
 
         *channel.sequence.borrow_mut() += 1;
 
@@ -184,7 +209,7 @@ where
                             *channel.sequence.borrow(),
                             timeout.clone(),
                         ),
-                        relayer.clone(),
+                        self.relayer.clone(),
                     );
 
                     let mut ack: Option<Binary> = None;
@@ -201,67 +226,179 @@ where
 
                     Ok(PacketReceiveResponse { ack, response })
                 }
-                IbcPort::Module(_) => todo!(),
+                IbcPort::Module(name) => {
+                    let (api, store, block, router) = self.app.use_parts();
+
+                    transactional(&mut *store, |write_cache, _| {
+                        router.ibc.packet_receive(
+                            &*api,
+                            write_cache,
+                            router,
+                            &*block,
+                            name,
+                            msg.clone(),
+                        )
+                    })
+                }
             },
             IbcMsg::CloseChannel { .. } => todo!(),
             _ => todo!(),
         }
     }
 
-    pub fn packet_ack(
-        &mut self,
-        ack: Binary,
-        original_msg: &IbcMsg,
-        relayer: &Addr,
-    ) -> AppResult<AppResponse> {
+    pub fn packet_ack(&mut self, ack: Binary, original_msg: &IbcMsg) -> AppResult<AppResponse> {
         let channel = original_msg.get_src_channel();
-        let channel = self
-            .channels
-            .get(&channel.as_channel_number()?)
-            .ok_or(anyhow!("Channel not found: {}", channel))?;
+
+        let channels = self.channels.borrow();
+
+        let channel = channels.get(channel)?;
 
         match original_msg {
             IbcMsg::Transfer { .. } => todo!(),
-            IbcMsg::SendPacket { data, timeout, .. } => match &channel.local.port {
-                IbcPort::Contract(contract) => {
-                    let code_id = self.app.contract_data(contract)?.code_id;
-                    let ibc_details = self
-                        .code_ids
-                        .get(&code_id)
-                        .ok_or(anyhow!("Code ID not found"))?;
+            IbcMsg::SendPacket { data, timeout, .. } => {
+                let msg = IbcPacketAckMsg::new(
+                    IbcAcknowledgement::new(ack),
+                    IbcPacket::new(
+                        data.clone(),
+                        channel.local.as_endpoint()?,
+                        channel.remote.as_endpoint()?,
+                        *channel.sequence.borrow(),
+                        timeout.clone(),
+                    ),
+                    self.relayer.clone(),
+                );
 
-                    let msg = IbcPacketAckMsg::new(
-                        IbcAcknowledgement::new(ack),
-                        IbcPacket::new(
-                            data.clone(),
-                            channel.local.as_endpoint()?,
-                            channel.remote.as_endpoint()?,
-                            *channel.sequence.borrow(),
-                            timeout.clone(),
-                        ),
-                        relayer.clone(),
-                    );
+                match &channel.local.port {
+                    IbcPort::Contract(contract) => {
+                        let code_id = self.app.contract_data(contract)?.code_id;
+                        let ibc_details = self
+                            .code_ids
+                            .get(&code_id)
+                            .ok_or(anyhow!("Code ID not found"))?;
 
-                    self.app.use_contract(contract, |deps, env| {
-                        ibc_details
-                            .ibc_packet_ack(deps, env, msg.clone())
-                            .into_app_response()
-                    })
+                        self.app.use_contract(contract, |deps, env| {
+                            ibc_details
+                                .ibc_packet_ack(deps, env, msg.clone())
+                                .into_app_response()
+                        })
+                    }
+                    IbcPort::Module(name) => {
+                        let (api, store, block, router) = self.app.use_parts();
+
+                        transactional(&mut *store, |write_cache, _| {
+                            router.ibc.packet_ack(
+                                &*api,
+                                write_cache,
+                                router,
+                                &*block,
+                                name,
+                                msg.clone(),
+                            )
+                        })
+                    }
                 }
-                IbcPort::Module(_) => todo!(),
-            },
+            }
             IbcMsg::CloseChannel { .. } => todo!(),
             _ => todo!(),
         }
     }
 
-    pub fn get_dest_channel_from_msg(&self, msg: &IbcMsg) -> AppResult<u64> {
-        let channel_id = msg.get_src_channel().as_channel_number()?;
-        let channel = self
-            .channels
-            .get(&channel_id)
-            .ok_or(anyhow!("Channel not found: {}", channel_id))?;
-        channel.remote.channel_id()
+    pub fn get_dest_channel_from_msg(&self, msg: &IbcMsg) -> AppResult<IbcChannelCreator> {
+        let channel_id = msg.get_src_channel();
+        self.channels
+            .borrow()
+            .get(channel_id)
+            .map(|val| val.remote.clone())
+    }
+
+    pub fn get_next_channel_id(&self) -> u64 {
+        self.channels.borrow().next_key()
+    }
+}
+
+pub trait IbcAppRef {
+    fn chain_id(&self) -> &str;
+    fn channel_connect(&mut self, channel_id: u64) -> AppResult<()>;
+    fn get_dest_channel_from_msg(&self, msg: &IbcMsg) -> AppResult<IbcChannelCreator>;
+    fn get_next_channel_id(&self) -> u64;
+    fn get_next_pending_packet(&self) -> AppResult<u64>;
+    fn get_pending_packet(&self, packet_id: u64) -> AppResult<IbcMsg>;
+    fn open_channel(
+        &mut self,
+        local: &IbcChannelCreator,
+        remote: &IbcChannelCreator,
+        sequence: Rc<RefCell<u64>>,
+    ) -> AppResult<IbcChannelWrapper>;
+    fn packet_ack(&mut self, ack: Binary, original_msg: &IbcMsg) -> AppResult<AppResponse>;
+    fn packet_receive(
+        &mut self,
+        msg: &IbcMsg,
+        dest_channel_id: u64,
+    ) -> AppResult<PacketReceiveResponse>;
+    fn remove_packet(&mut self, packet_id: u64) -> AppResult<()>;
+    fn some_pending_packets(&self) -> bool;
+}
+
+impl<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, GovT, StargateT> IbcAppRef
+    for IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcModule, GovT, StargateT>
+where
+    BankT: Bank + 'static,
+    ApiT: Api + 'static,
+    StorageT: Storage + 'static,
+    CustomT: Module + 'static,
+    WasmT: Wasm<CustomT::ExecT, CustomT::QueryT> + 'static,
+    StakingT: Staking + 'static,
+    DistrT: Distribution + 'static,
+    GovT: Gov + 'static,
+    StargateT: Stargate + 'static,
+    CustomT::ExecT: CustomMsg + DeserializeOwned + 'static,
+    CustomT::QueryT: CustomQuery + DeserializeOwned + 'static,
+{
+    fn chain_id(&self) -> &str {
+        &self.chain_id
+    }
+    fn channel_connect(&mut self, channel_id: u64) -> AppResult<()> {
+        self.channel_connect(channel_id)
+    }
+    fn get_dest_channel_from_msg(&self, msg: &IbcMsg) -> AppResult<IbcChannelCreator> {
+        self.get_dest_channel_from_msg(msg)
+    }
+    fn get_next_channel_id(&self) -> u64 {
+        self.get_next_channel_id()
+    }
+    fn get_next_pending_packet(&self) -> AppResult<u64> {
+        self.get_next_pending_packet()
+    }
+    fn get_pending_packet(&self, packet_id: u64) -> AppResult<IbcMsg> {
+        self.get_pending_packet(packet_id)
+    }
+
+    fn open_channel(
+        &mut self,
+        local: &IbcChannelCreator,
+        remote: &IbcChannelCreator,
+        sequence: Rc<RefCell<u64>>,
+    ) -> AppResult<IbcChannelWrapper> {
+        self.open_channel(local, remote, sequence)
+    }
+    fn packet_ack(&mut self, ack: Binary, original_msg: &IbcMsg) -> AppResult<AppResponse> {
+        self.packet_ack(ack, original_msg)
+    }
+
+    fn packet_receive(
+        &mut self,
+        msg: &IbcMsg,
+        dest_channel_id: u64,
+    ) -> AppResult<PacketReceiveResponse> {
+        self.packet_receive(msg, dest_channel_id)
+    }
+
+    fn remove_packet(&mut self, packet_id: u64) -> AppResult<()> {
+        self.remove_packet(packet_id)
+    }
+
+    fn some_pending_packets(&self) -> bool {
+        self.some_pending_packets()
     }
 }
 

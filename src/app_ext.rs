@@ -1,18 +1,22 @@
-use cosmwasm_std::{Api, CustomMsg, CustomQuery, Storage};
-use cw_multi_test::{App, Bank, Distribution, Gov, Ibc, Module, Staking, Stargate, Wasm};
+use std::{cell::RefCell, rc::Rc};
+
+use cosmwasm_std::{CustomMsg, CustomQuery, Storage};
+use cw_multi_test::{App, Bank, Distribution, Gov, MockApiBech32, Module, Staking, Stargate, Wasm};
 use serde::de::DeserializeOwned;
 
-use crate::ibc_app::IbcApp;
+use crate::{
+    ibc_app::{IbcApp, SharedChannels},
+    ibc_module::IbcModule,
+};
 
 pub trait AppExt<
     BankT,
-    ApiT,
+    MockApiBech32,
     StorageT,
     CustomT: Module,
     WasmT,
     StakingT,
     DistrT,
-    IbcT,
     GovT,
     StargateT,
 > where
@@ -20,34 +24,79 @@ pub trait AppExt<
 {
     fn into_ibc_app(
         self,
-    ) -> IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>;
+        chain_id: impl Into<String>,
+    ) -> Rc<
+        RefCell<
+            IbcApp<
+                BankT,
+                MockApiBech32,
+                StorageT,
+                CustomT,
+                WasmT,
+                StakingT,
+                DistrT,
+                IbcModule,
+                GovT,
+                StargateT,
+            >,
+        >,
+    >;
 }
 
-impl<BankT, ApiT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
-    AppExt<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
-    for App<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
+impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, GovT, StargateT>
+    AppExt<BankT, MockApiBech32, StorageT, CustomT, WasmT, StakingT, DistrT, GovT, StargateT>
+    for App<
+        BankT,
+        MockApiBech32,
+        StorageT,
+        CustomT,
+        WasmT,
+        StakingT,
+        DistrT,
+        IbcModule,
+        GovT,
+        StargateT,
+    >
 where
     CustomT::QueryT: CustomQuery + DeserializeOwned + 'static,
     CustomT::ExecT: CustomMsg + DeserializeOwned + 'static,
     WasmT: Wasm<CustomT::ExecT, CustomT::QueryT>,
     BankT: Bank,
-    ApiT: Api,
+    // ApiT: Api,
     StorageT: Storage,
     CustomT: Module,
     StakingT: Staking,
     DistrT: Distribution,
-    IbcT: Ibc,
     GovT: Gov,
     StargateT: Stargate,
 {
     fn into_ibc_app(
         self,
-    ) -> IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
-    {
-        IbcApp {
+        chain_id: impl Into<String>,
+    ) -> Rc<
+        RefCell<
+            IbcApp<
+                BankT,
+                MockApiBech32,
+                StorageT,
+                CustomT,
+                WasmT,
+                StakingT,
+                DistrT,
+                IbcModule,
+                GovT,
+                StargateT,
+            >,
+        >,
+    > {
+        let channels: SharedChannels = self.read_module(|router, _, _| router.ibc.channels.clone());
+        Rc::new(RefCell::new(IbcApp {
+            relayer: self.api().addr_make("default_relayer"),
+            chain_id: chain_id.into(),
             app: self,
             code_ids: Default::default(),
-            channels: Default::default(),
-        }
+            channels,
+        }))
     }
 }
+
