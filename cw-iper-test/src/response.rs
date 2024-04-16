@@ -1,14 +1,13 @@
 use cosmwasm_std::{
-    to_json_binary, Binary, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcMsg, IbcReceiveResponse,
-    Response,
+    to_json_binary, Binary, Ibc3ChannelOpenResponse, IbcBasicResponse, IbcReceiveResponse, Response,
 };
 use cw_multi_test::AppResponse;
 
-use crate::error::AppResult;
+use crate::{error::AppResult, ibc_module::IbcPacketType};
 
 #[derive(Debug, Clone)]
 pub struct RelayedResponse {
-    pub msg: IbcMsg,
+    pub packet: IbcPacketType,
     pub dest_response: AppResponse,
     pub ack: Option<Binary>,
     pub src_response: Option<AppResponse>,
@@ -54,5 +53,25 @@ impl<T> IntoResponse<T> for AppResult<IbcReceiveResponse<T>> {
         }
 
         Ok(ret)
+    }
+}
+
+pub trait AppResponseExt {
+    fn merge(self, with: AppResponse) -> AppResponse;
+}
+
+impl AppResponseExt for AppResponse {
+    fn merge(self, with: AppResponse) -> AppResponse {
+        let mut base = self;
+
+        let mut with = with;
+
+        base.events.append(&mut with.events);
+
+        if base.data.is_none() {
+            base.data = with.data;
+        }
+
+        base
     }
 }

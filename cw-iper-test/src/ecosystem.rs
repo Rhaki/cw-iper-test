@@ -1,5 +1,8 @@
-use crate::{error::AppResult, ibc::IbcChannelCreator, ibc_app::IbcAppRef, response::RelayedResponse};
+use crate::{
+    error::AppResult, ibc::IbcChannelCreator, ibc_app::IbcAppRef, ibc_module::IbcPacketType,
+};
 use anyhow::anyhow;
+use cw_multi_test::AppResponse;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 #[derive(Default)]
@@ -46,7 +49,7 @@ impl Ecosystem {
         Ok(())
     }
 
-    pub fn relay_all_packets(&self) -> AppResult<Vec<RelayedResponse>> {
+    pub fn relay_all_packets(&self) -> AppResult<Vec<AppResponse>> {
         let mut res = vec![];
 
         let mut finished = false;
@@ -66,10 +69,7 @@ impl Ecosystem {
         Ok(res)
     }
 
-    pub fn relay_next_packet(
-        &self,
-        chain_id: impl Into<String> + Clone,
-    ) -> AppResult<RelayedResponse> {
+    pub fn relay_next_packet(&self, chain_id: impl Into<String> + Clone) -> AppResult<AppResponse> {
         let app = self.get_app(chain_id.clone())?;
         let packet_id = app.borrow().get_next_pending_packet()?;
         self.relay_packet(chain_id, packet_id)
@@ -79,33 +79,34 @@ impl Ecosystem {
         &self,
         chain_id: impl Into<String>,
         packet_id: u64,
-    ) -> AppResult<RelayedResponse> {
+    ) -> AppResult<AppResponse> {
         let app_src = self.get_app(chain_id)?;
 
-        let msg = app_src.borrow().get_pending_packet(packet_id)?;
+        let packet = app_src.borrow().get_pending_packet(packet_id)?;
 
-        let dest_channel = app_src.borrow().get_dest_channel_from_msg(&msg)?;
+        let channel_info = app_src
+            .borrow()
+            .get_channel_info(packet.get_local_channel_id())?;
 
-        let app_dest = self.get_app(&dest_channel.chain_id)?;
+        let app_dest = self.get_app(&channel_info.remote.chain_id)?;
 
-        let dest_response = app_dest
-            .borrow_mut()
-            .packet_receive(&msg, dest_channel.channel_id()?)?;
-
-        let ack_response = if let Some(ack) = &dest_response.ack {
-            Some(app_src.borrow_mut().packet_ack(ack.clone(), &msg)?)
-        } else {
-            None
-        };
+        let response = app_dest.borrow_mut().incoming_packet(packet)?;
 
         app_src.borrow_mut().remove_packet(packet_id)?;
 
-        Ok(RelayedResponse {
-            msg,
-            dest_response: dest_response.response,
-            ack: dest_response.ack,
-            src_response: ack_response,
-        })
+        Ok(response)
+    }
+
+    pub fn get_all_pending_packets(
+        &self,
+    ) -> AppResult<BTreeMap<String, BTreeMap<u64, IbcPacketType>>> {
+        let mut map = BTreeMap::new();
+
+        for (chain_id, app) in &self.apps {
+            map.insert(chain_id.clone(), app.borrow().get_pending_packets()?);
+        }
+
+        Ok(map)
     }
 
     fn get_app(&self, chain_id: impl Into<String>) -> AppResult<&Rc<RefCell<dyn IbcAppRef>>> {

@@ -1,4 +1,5 @@
 use cosmwasm_std::{to_json_binary, IbcMsg, IbcOrder, IbcTimeout, Timestamp};
+use cw_iper_test::cw_multi_test::{no_init, AppBuilder, ContractWrapper, Executor, MockApiBech32};
 use cw_iper_test::{
     app_ext::AppExt,
     contracts::{ContractWrapperExt, IbcClosures, MultiContract},
@@ -6,17 +7,17 @@ use cw_iper_test::{
     ibc::{IbcChannelCreator, IbcPort},
     ibc_app_builder::IbcAppBuilder,
     ibc_module::IbcModule,
+    stargate::StargateModule,
 };
-use cw_multi_test::Executor;
-use cw_multi_test::{no_init, AppBuilder, ContractWrapper, MockApiBech32};
 
 use crate::mock_contracts::counter;
 
 #[test]
-fn base() {
+fn example_contract_to_contract() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
         .with_ibc(IbcModule::default())
+        .with_stargate(StargateModule::default())
         .build(no_init)
         .into_ibc_app("terra");
 
@@ -121,6 +122,10 @@ fn base() {
         .unwrap();
 
     eco.relay_all_packets().unwrap();
+
+    let pending = eco.get_all_pending_packets();
+
+    println!("{pending:#?}")
 
     // println!("{pending_packets:#?}")
 }

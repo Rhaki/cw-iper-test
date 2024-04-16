@@ -62,7 +62,6 @@ where
     CustomT::ExecT: CustomMsg + DeserializeOwned + 'static,
     WasmT: Wasm<CustomT::ExecT, CustomT::QueryT>,
     BankT: Bank,
-    // ApiT: Api,
     StorageT: Storage,
     CustomT: Module,
     StakingT: Staking,
@@ -99,4 +98,3 @@ where
         }))
     }
 }
-

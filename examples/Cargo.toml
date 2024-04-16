@@ -1,0 +1,14 @@
+[package]
+name            = "cw-iper-test-examples"
+version         = { workspace = true }
+authors         = { workspace = true }
+edition         = { workspace = true }
+
+[dependencies]
+cosmwasm-std     = { workspace = true }
+cosmwasm-schema  = { workspace = true }
+cw-iper-test     = { workspace = true }
+thiserror        = { workspace = true }
+ibc              = { workspace = true }
+ibc-proto        = { workspace = true }
+prost            = { workspace = true }

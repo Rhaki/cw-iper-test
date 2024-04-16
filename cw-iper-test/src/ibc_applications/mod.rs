@@ -1,66 +1,72 @@
 use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
-    Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg, Storage,
+    Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
+    IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::AppResponse;
 
-use crate::{
-    error::AppResult,
-    ibc_app::PacketReceiveResponse,
-    ibc_module::{UseRouter, UseRouterResponse},
-};
+use crate::{error::AppResult, ibc::IbcChannelWrapper, router::RouterWrapper};
 
 mod ics20;
 
+mod ibc_hook;
+
+mod middleware;
+
 pub use ics20::Ics20;
 
-pub trait IbcApplication {
-    fn port_name(&self) -> String;
+pub use ibc_hook::IbcHook;
 
+pub trait IbcApplication: IbcPortInterface {
     fn handle_outgoing_packet(
         &self,
-        msg: IbcMsg,
         api: &dyn Api,
         block: &BlockInfo,
         sender: Addr,
-        clos: &dyn Fn(UseRouter) -> AppResult<UseRouterResponse>,
+        router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcMsg,
+        channel: IbcChannelWrapper,
     ) -> AppResult<AppResponse>;
 
     fn packet_receive(
         &self,
-        msg: IbcMsg,
         api: &dyn Api,
         block: &BlockInfo,
-        clos: &dyn Fn(UseRouter) -> AppResult<UseRouterResponse>,
+        router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-    ) -> AppResult<PacketReceiveResponse>;
+        msg: IbcPacketReceiveMsg,
+    ) -> AppResult<AppResponse>;
 
     fn packet_ack(
         &self,
-        msg: IbcPacketAckMsg,
         api: &dyn Api,
         block: &BlockInfo,
-        clos: &dyn Fn(UseRouter) -> AppResult<UseRouterResponse>,
+        router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcPacketAckMsg,
     ) -> AppResult<AppResponse>;
 
     fn open_channel(
         &self,
-        msg: IbcChannelOpenMsg,
         api: &dyn Api,
         block: &BlockInfo,
-        clos: &dyn Fn(UseRouter) -> AppResult<UseRouterResponse>,
+        router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcChannelOpenMsg,
     ) -> AppResult<AppResponse>;
 
     fn channel_connect(
         &self,
-        msg: IbcChannelConnectMsg,
         api: &dyn Api,
         block: &BlockInfo,
-        clos: &dyn Fn(UseRouter) -> AppResult<UseRouterResponse>,
+        router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcChannelConnectMsg,
     ) -> AppResult<AppResponse>;
+}
+
+pub trait IbcPortInterface {
+    fn port_name(&self) -> String;
 }

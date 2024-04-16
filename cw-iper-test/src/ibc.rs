@@ -2,9 +2,17 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use anyhow::{anyhow, bail};
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, IbcChannel, IbcEndpoint, IbcMsg, IbcOrder};
+use cosmwasm_std::{
+    to_json_binary, Addr, IbcChannel, IbcEndpoint, IbcMsg, IbcOrder, IbcTimeout, IbcTimeoutBlock,
+    Timestamp,
+};
+use ibc_proto::ibc::{apps::transfer::v2::FungibleTokenPacketData, core::client::v1::Height};
 
-use crate::error::AppResult;
+use crate::{
+    error::AppResult,
+    ibc_applications::IbcApplication,
+    ibc_module::{IbcPacketType, OutgoingPacket},
+};
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -134,6 +142,10 @@ impl IbcPort {
             IbcPort::Module(name) => name.clone(),
         }
     }
+
+    pub fn from_application(ibc_application: impl IbcApplication) -> Self {
+        Self::Module(ibc_application.port_name())
+    }
 }
 
 #[cw_serde]
@@ -208,6 +220,11 @@ impl IbcChannelExt for IbcChannel {
 
 pub trait IbcMsgExt {
     fn get_src_channel(&self) -> String;
+    fn into_packet(
+        self,
+        sender: &Addr,
+        channel_wrapper: &IbcChannelWrapper,
+    ) -> AppResult<IbcPacketType>;
 }
 
 impl IbcMsgExt for IbcMsg {
@@ -217,6 +234,71 @@ impl IbcMsgExt for IbcMsg {
             IbcMsg::SendPacket { channel_id, .. } => channel_id.clone(),
             IbcMsg::CloseChannel { channel_id } => channel_id.clone(),
             _ => todo!(),
+        }
+    }
+
+    fn into_packet(
+        self,
+        sender: &Addr,
+        channel_wrapper: &IbcChannelWrapper,
+    ) -> AppResult<IbcPacketType> {
+        let src = channel_wrapper.local.as_endpoint()?;
+        let dest = channel_wrapper.remote.as_endpoint()?;
+
+        match self {
+            IbcMsg::Transfer {
+                to_address,
+                amount,
+                timeout,
+                memo,
+                ..
+            } => Ok(IbcPacketType::OutgoingPacket(OutgoingPacket {
+                data: to_json_binary(&FungibleTokenPacketData {
+                    denom: amount.denom,
+                    amount: amount.amount.to_string(),
+                    sender: sender.to_string(),
+                    receiver: to_address,
+                    memo: memo.unwrap_or_default(),
+                })?,
+                src,
+                dest,
+                timeout,
+            })),
+            IbcMsg::SendPacket { data, timeout, .. } => {
+                Ok(IbcPacketType::OutgoingPacket(OutgoingPacket {
+                    data,
+                    src,
+                    dest,
+                    timeout,
+                }))
+            }
+            IbcMsg::CloseChannel { channel_id } => Ok(IbcPacketType::CloseChannel { channel_id }),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+pub fn create_ibc_timeout(nanos: u64, height: Option<Height>) -> IbcTimeout {
+    match (nanos, height) {
+        (0, None) => unimplemented!(),
+        (0, Some(height)) => {
+            return IbcTimeout::with_block(IbcTimeoutBlock {
+                revision: height.revision_number,
+                height: height.revision_height,
+            });
+        }
+        (seconds, None) => {
+            return IbcTimeout::with_timestamp(Timestamp::from_nanos(seconds));
+        }
+
+        (seconds, Some(height)) => {
+            return IbcTimeout::with_both(
+                IbcTimeoutBlock {
+                    revision: height.revision_number,
+                    height: height.revision_height,
+                },
+                Timestamp::from_nanos(seconds),
+            );
         }
     }
 }
