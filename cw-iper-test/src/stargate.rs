@@ -139,7 +139,7 @@ impl Module for StargateModule {
 
 impl Stargate for StargateModule {}
 
-pub trait StargateApplication: StargateUrls {
+pub trait StargateApplication: StargateUrls + StargateName {
     fn stargate_msg(
         &self,
         api: &dyn Api,
@@ -162,11 +162,11 @@ pub trait StargateApplication: StargateUrls {
 }
 
 pub trait StargateUrls {
-    fn stargate_name(&self) -> String;
-
     fn is_query_type_url(&self, type_url: String) -> bool;
-
     fn is_msg_type_url(&self, type_url: String) -> bool;
-
     fn type_urls(&self) -> Vec<String>;
+}
+
+pub trait StargateName {
+    fn stargate_name(&self) -> String;
 }

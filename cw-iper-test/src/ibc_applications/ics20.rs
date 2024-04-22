@@ -1,14 +1,12 @@
-use std::str::FromStr;
 use std::{cell::RefCell, rc::Rc};
 
-use super::IbcApplication;
 use anyhow::anyhow;
 use cosmwasm_std::{
     from_json, to_json_binary, Addr, Api, BankMsg, Binary, BlockInfo, Coin, CosmosMsg, Empty,
     GrpcQuery, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
     IbcPacketReceiveMsg, Storage, Uint128,
 };
-use cw_iper_test_macros::{urls, IbcPort, Stargate};
+use cw_iper_test_macros::{urls_int, IbcPort, Stargate};
 use cw_multi_test::{AppResponse, BankSudo, SudoMsg};
 
 use ibc_proto::ibc::apps::transfer::v1::MsgTransfer;
@@ -16,29 +14,27 @@ use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use serde::{Deserialize, Serialize};
 
 use crate::ibc::create_ibc_timeout;
-use crate::ibc_module::{
-    emit_packet_boxed, AckPacket, IbcPacketType, OutgoingPacket, OutgoingPacketRaw,
-};
-use crate::IbcPortInterface;
+use crate::ibc_application::{IbcApplication, PacketReceiveResponse};
+use crate::ibc_module::{emit_packet_boxed, IbcPacketType, OutgoingPacket, OutgoingPacketRaw};
 
-use crate::stargate::StargateUrls;
 use crate::{
     error::AppResult, ibc::IbcChannelWrapper, router::RouterWrapper, stargate::StargateApplication,
 };
 use prost::Message;
 
-#[derive(Default, IbcPort, Stargate)]
+use std::str::FromStr;
+#[derive(Default, Clone, IbcPort, Stargate)]
 #[ibc_port = "transfer"]
 #[stargate(name = "ics20", query_urls = Ics20QueryUrls, msgs_urls = Ics20MsgUrls)]
 pub struct Ics20;
 
-#[urls]
+#[urls_int]
 pub enum Ics20MsgUrls {
     #[strum(serialize = "/ibc.applications.transfer.v1.MsgTransfer")]
     MsgTransfer,
 }
 
-#[urls]
+#[urls_int]
 pub enum Ics20QueryUrls {}
 
 impl IbcApplication for Ics20 {
@@ -108,8 +104,8 @@ impl IbcApplication for Ics20 {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcPacketReceiveMsg,
-    ) -> AppResult<AppResponse> {
-        let fna = || {
+    ) -> AppResult<PacketReceiveResponse> {
+        let clos = || {
             let data: FungibleTokenPacketData = from_json(&msg.packet.data)?;
 
             let to = api.addr_validate(&data.receiver)?;
@@ -122,29 +118,15 @@ impl IbcApplication for Ics20 {
             }))
         };
 
-        match fna() {
-            Ok(response) => {
-                emit_packet_boxed(
-                    IbcPacketType::AckPacket(AckPacket {
-                        ack: to_json_binary(&FungibleTokenPacketAck::Ok)?,
-                        original_packet: msg,
-                    }),
-                    &storage,
-                )?;
-
-                Ok(response)
-            }
-            Err(err) => {
-                emit_packet_boxed(
-                    IbcPacketType::AckPacket(AckPacket {
-                        ack: to_json_binary(&FungibleTokenPacketAck::Err(err.to_string()))?,
-                        original_packet: msg,
-                    }),
-                    &storage,
-                )?;
-
-                Ok(AppResponse::default())
-            }
+        match clos() {
+            Ok(response) => Ok(PacketReceiveResponse {
+                response: AppResponse::default(),
+                ack: to_json_binary(&FungibleTokenPacketAck::Ok)?,
+            }),
+            Err(err) => Ok(PacketReceiveResponse {
+                response: AppResponse::default(),
+                ack: to_json_binary(&FungibleTokenPacketAck::Err(err.to_string()))?,
+            }),
         }
     }
 

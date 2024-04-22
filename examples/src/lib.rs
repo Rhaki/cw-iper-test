@@ -4,3 +4,6 @@ mod example_contract_to_contract;
 mod example_ics20;
 #[cfg(test)]
 mod mock_contracts;
+
+#[cfg(test)]
+mod example_ibc_hook;

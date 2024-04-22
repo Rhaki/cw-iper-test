@@ -5,22 +5,28 @@ use cosmwasm_std::{
     IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::AppResponse;
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     error::AppResult,
     ibc::IbcChannelWrapper,
+    ibc_application::{IbcApplication, IbcPortInterface, PacketReceiveResponse},
     response::AppResponseExt,
     router::RouterWrapper,
-    stargate::{StargateApplication, StargateUrls},
+    stargate::{StargateApplication, StargateName, StargateUrls},
 };
-
-use super::{IbcApplication, IbcPortInterface};
 
 pub trait IbcAndStargate: IbcApplication + StargateApplication {}
 
-pub enum MiddlewareResponse<T> {
-    Stop(T),
-    Continue(T),
+pub type MiddlewareUniqueResponse<T> = MiddlewareResponse<T, T>;
+
+pub enum MiddlewareResponse<S, C> {
+    Stop(S),
+    Continue(C),
+}
+
+pub struct PacketToNext {
+    pub packet: IbcPacketReceiveMsg,
 }
 
 pub trait Middleware {
@@ -35,16 +41,27 @@ pub trait Middleware {
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcMsg,
         channel: IbcChannelWrapper,
-    ) -> AppResult<MiddlewareResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 
-    fn mid_packet_receive(
+    fn mid_packet_receive_before(
         &self,
         api: &dyn Api,
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketReceiveMsg,
-    ) -> AppResult<MiddlewareResponse<AppResponse>>;
+        packet: IbcPacketReceiveMsg,
+    ) -> AppResult<MiddlewareResponse<PacketReceiveResponse, PacketToNext>>;
+
+    fn mid_packet_receive_after(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        original_packet: IbcPacketReceiveMsg,
+        forwarded_packet: IbcPacketReceiveMsg,
+        forwarded_response: PacketReceiveResponse,
+    ) -> AppResult<PacketReceiveResponse>;
 
     fn mid_packet_ack(
         &self,
@@ -53,7 +70,7 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcPacketAckMsg,
-    ) -> AppResult<MiddlewareResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 
     fn mid_open_channel(
         &self,
@@ -62,7 +79,7 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcChannelOpenMsg,
-    ) -> AppResult<MiddlewareResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 
     fn mid_channel_connect(
         &self,
@@ -71,7 +88,7 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcChannelConnectMsg,
-    ) -> AppResult<MiddlewareResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 }
 
 impl<T> IbcPortInterface for T
@@ -85,7 +102,7 @@ where
 
 impl<T> IbcApplication for T
 where
-    T: Middleware,
+    T: Middleware + StargateUrls + Serialize + DeserializeOwned + 'static,
 {
     fn handle_outgoing_packet(
         &self,
@@ -122,15 +139,35 @@ where
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketReceiveMsg,
-    ) -> AppResult<AppResponse> {
-        match self.mid_packet_receive(api, block, router, storage.clone(), msg.clone())? {
+        original_packet: IbcPacketReceiveMsg,
+    ) -> AppResult<PacketReceiveResponse> {
+        match self.mid_packet_receive_before(
+            api,
+            block,
+            router,
+            storage.clone(),
+            original_packet.clone(),
+        )? {
             MiddlewareResponse::Stop(response) => Ok(response),
-            MiddlewareResponse::Continue(response) => {
-                let sub_response = self
-                    .get_inner()
-                    .packet_receive(api, block, router, storage, msg)?;
-                Ok(response.merge(sub_response))
+            MiddlewareResponse::Continue(next_packet) => {
+                let sub_response = self.get_inner().packet_receive(
+                    api,
+                    block,
+                    router,
+                    storage.clone(),
+                    next_packet.packet.clone(),
+                )?;
+
+                let after_response = self.mid_packet_receive_after(
+                    api,
+                    block,
+                    router,
+                    storage,
+                    original_packet,
+                    next_packet.packet,
+                    sub_response,
+                )?;
+                Ok(after_response)
             }
         }
     }
@@ -193,9 +230,18 @@ where
     }
 }
 
+impl<T> StargateName for T
+where
+    T: Middleware,
+{
+    fn stargate_name(&self) -> String {
+        self.get_inner().stargate_name()
+    }
+}
+
 impl<T> StargateApplication for T
 where
-    T: Middleware + StargateUrls,
+    T: Middleware + StargateUrls + Serialize + DeserializeOwned + 'static,
 {
     fn stargate_msg(
         &self,
@@ -207,8 +253,17 @@ where
         type_url: String,
         data: cosmwasm_std::Binary,
     ) -> AppResult<AppResponse> {
-        self.get_inner()
-            .stargate_msg(api, storage, router, block, sender, type_url, data)
+        let res = self.get_inner().stargate_msg(
+            api,
+            storage.clone(),
+            router,
+            block,
+            sender,
+            type_url,
+            data,
+        )?;
+
+        Ok(res)
     }
 
     fn stargate_query(
@@ -228,10 +283,6 @@ impl<T> StargateUrls for T
 where
     T: Middleware,
 {
-    fn stargate_name(&self) -> String {
-        self.get_inner().stargate_name()
-    }
-
     fn is_query_type_url(&self, type_url: String) -> bool {
         self.get_inner().is_query_type_url(type_url)
     }

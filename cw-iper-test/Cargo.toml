@@ -1,20 +1,21 @@
 [package]
-name            = "cw-iper-test"
-version         = { workspace = true }
-authors         = { workspace = true }
-edition         = { workspace = true }
+name                = "cw-iper-test"
+version             = { workspace = true }
+authors             = { workspace = true }
+edition             = { workspace = true }
 
 [dependencies]
-anyhow           = { workspace = true }
-cosmwasm-std     = { workspace = true }
-cosmwasm-schema  = { workspace = true }
-cw-multi-test    = { workspace = true }
-cw-storage-plus  = { workspace = true }
-serde            = { workspace = true }
-thiserror        = { workspace = true }
-ibc              = { workspace = true }
-ibc-proto        = { workspace = true }
-cw-iper-test-macros = { workspace = true }
-strum              = { workspace = true }
-strum_macros       = { workspace = true }
-prost              = { workspace = true }
+anyhow              = { workspace = true }
+cosmwasm-std        = { workspace = true }
+cosmwasm-schema     = { workspace = true }
+cw-iper-test-macros = { workspace = true, features = ["internal"]}
+cw-multi-test       = { workspace = true }
+cw-storage-plus     = { workspace = true }
+ibc                 = { workspace = true }
+ibc-proto           = { workspace = true }
+prost               = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+strum               = { workspace = true }
+strum_macros        = { workspace = true }
+thiserror           = { workspace = true }

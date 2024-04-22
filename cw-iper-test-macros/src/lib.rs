@@ -25,13 +25,11 @@ pub fn derive_ibc_port(input: TokenStream) -> TokenStream {
         panic!("port attributes not in corrected format. Requested in format #[port = 'port']")
     }
 
-    let trait_path: syn::Path = syn::parse_quote!(IbcPortInterface);
-
     let expanded = quote! {
         impl #struct_name {
             pub const IBC_PORT: &'static str = #f;
         }
-        impl #trait_path for #struct_name {
+        impl crate::ibc_application::IbcPortInterface for #struct_name {
             fn port_name(&self) -> String {
                 #f.to_string()
             }
@@ -60,13 +58,11 @@ pub fn derive_stargate(input: TokenStream) -> TokenStream {
                 if ident == "name" {
                     let a: Vec<TokenTree> = list.tokens.clone().into_iter().collect();
                     let a = a[index + 2].clone();
-
                     name = Some(quote! {#a})
                 }
                 if ident == "query_urls" {
                     let a: Vec<TokenTree> = list.tokens.clone().into_iter().collect();
                     let a = a[index + 2].clone();
-
                     query = Some(quote! {#a})
                 }
 
@@ -81,35 +77,29 @@ pub fn derive_stargate(input: TokenStream) -> TokenStream {
 
     let query = query.expect("query_urls attribute not found");
     let msgs = msgs.expect("msgs_urls attribute not found");
-    let name = name.expect("name attribute not found");
 
     let expanded = quote! {
-
-        use strum::IntoEnumIterator;
-
-        impl #struct_name {
-            pub const STARGATE_NAME: &'static str = #name;
-        }
-
-        impl StargateUrls for #struct_name {
-
-            fn stargate_name(&self) -> String {
-                #name.to_string()
-            }
+        impl crate::stargate::StargateUrls for #struct_name {
 
             fn is_query_type_url(&self, type_url: String) -> bool {
-                #query::from_str(&type_url).is_ok()
+                <#query as std::str::FromStr>::from_str(&type_url).is_ok()
             }
 
             fn is_msg_type_url(&self, type_url: String) -> bool {
-                #msgs::from_str(&type_url).is_ok()
+                <#msgs as std::str::FromStr>::from_str(&type_url).is_ok()
             }
 
             fn type_urls(&self) -> Vec<String> {
                 let mut urls = Vec::new();
-                urls.extend(#query::iter().map(|url| url.to_string()));
-                urls.extend(#msgs::iter().map(|url| url.to_string()));
+                urls.extend(<#query as strum::IntoEnumIterator>::iter().map(|url| url.to_string()));
+                urls.extend(<#msgs as strum::IntoEnumIterator>::iter().map(|url| url.to_string()));
                 urls
+            }
+        }
+
+        impl crate::stargate::StargateName for #struct_name {
+            fn stargate_name(&self) -> String {
+                #name.to_string()
             }
         }
     };
@@ -130,8 +120,21 @@ pub fn derive_stargate(input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn urls(_attr: proc_macro::TokenStream, input: proc_macro::TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+
     let expanded = quote! {
-        #[derive(strum_macros::EnumString, strum_macros::EnumIter, strum_macros::Display)]
+        #[derive(cw_iper_test::exports::strum_macros::EnumString, cw_iper_test::exports::strum_macros::EnumIter, cw_iper_test::exports::strum_macros::Display)]
+        #input
+    };
+    TokenStream::from(expanded)
+}
+
+#[cfg(feature = "internal")]
+#[proc_macro_attribute]
+pub fn urls_int(_attr: proc_macro::TokenStream, input: proc_macro::TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let expanded = quote! {
+        #[derive(::strum_macros::EnumString, ::strum_macros::EnumIter, ::strum_macros::Display)]
         #input
     };
     TokenStream::from(expanded)

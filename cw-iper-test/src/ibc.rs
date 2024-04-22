@@ -10,7 +10,7 @@ use ibc_proto::ibc::{apps::transfer::v2::FungibleTokenPacketData, core::client::
 
 use crate::{
     error::AppResult,
-    ibc_applications::IbcApplication,
+    ibc_application::IbcApplication,
     ibc_module::{IbcPacketType, OutgoingPacket},
 };
 

@@ -5,11 +5,17 @@ pub mod error;
 pub mod ibc;
 pub mod ibc_app;
 pub mod ibc_app_builder;
+pub mod ibc_application;
 pub mod ibc_applications;
 pub mod ibc_module;
 pub mod response;
-pub mod stargate;
 pub mod router;
-pub use cw_multi_test;
+pub mod stargate;
 
-pub use self::ibc_applications::IbcPortInterface;
+pub use cw_multi_test;
+// pub use cw_iper_test_macros;
+
+pub mod exports {
+    pub use strum;
+    pub use strum_macros;
+}

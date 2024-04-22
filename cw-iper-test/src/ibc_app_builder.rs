@@ -1,13 +1,13 @@
 use std::{cell::RefCell, rc::Rc};
 
-use cosmwasm_std::{testing::MockStorage, Empty};
+use cosmwasm_std::{testing::MockStorage, Empty, Storage};
 use cw_multi_test::{
     AppBuilder, BankKeeper, DistributionKeeper, FailingModule, GovFailingModule, MockApiBech32,
     Module, StakeKeeper, WasmKeeper,
 };
 
 use crate::{
-    ibc_applications::IbcApplication,
+    ibc_application::IbcApplication,
     ibc_module::IbcModule,
     stargate::{StargateApplication, StargateModule},
 };
@@ -58,6 +58,8 @@ impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, GovT> AppBuilder
         GovT,
         StargateModule,
     >
+where
+    StorageT: Storage,
 {
     fn with_ibc_app<T: IbcApplication + StargateApplication + 'static>(
         self,
@@ -104,11 +106,13 @@ impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, IbcT, GovT> AppB
         GovT,
         StargateModule,
     >
+where
+    StorageT: Storage,
 {
-    fn with_stargate_app<T: StargateApplication + 'static>(self, application: T) -> Self {
+    fn with_stargate_app<T: StargateApplication + 'static>(mut self, application: T) -> Self {
         let mut stargate = self.stargate;
         let application = Rc::new(RefCell::new(application));
-        stargate.try_add_application(application).unwrap();
+        stargate.try_add_application(application.clone()).unwrap();
 
         Self {
             api: self.api,

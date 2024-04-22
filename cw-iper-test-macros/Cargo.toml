@@ -9,5 +9,8 @@ proc-macro2     = "1"
 quote           = "1"
 syn             = { version = "2.0.59", features = ["full", "printing", "extra-traits"] }
 
+[features]
+internal        = []
+
 [lib]
 proc-macro      = true

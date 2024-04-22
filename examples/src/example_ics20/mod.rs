@@ -292,3 +292,4 @@ fn failing_ics20_transfer() {
 
     assert_eq!(balance.amount, Uint128::zero())
 }
+

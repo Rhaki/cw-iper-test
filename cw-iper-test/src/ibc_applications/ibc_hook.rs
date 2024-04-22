@@ -1,4 +1,24 @@
-use super::{middleware::{IbcAndStargate, Middleware}, IbcApplication};
+use std::{cell::RefCell, rc::Rc};
+
+use cosmwasm_std::{
+    from_json, to_json_binary, Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg,
+    IbcMsg, IbcPacket, IbcPacketAckMsg, IbcPacketReceiveMsg, Storage,
+};
+use cw_multi_test::AppResponse;
+use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::{
+    error::AppResult,
+    ibc::IbcChannelWrapper,
+    ibc_application::{IbcApplication, PacketReceiveResponse},
+    router::RouterWrapper,
+};
+
+use super::middleware::{
+    IbcAndStargate, Middleware, MiddlewareResponse, MiddlewareUniqueResponse, PacketToNext,
+};
 
 pub struct IbcHook {
     pub inner: Box<dyn IbcApplication>,
@@ -12,65 +32,123 @@ impl IbcHook {
     }
 }
 
-impl Middleware for IbcHook{
+impl Middleware for IbcHook {
     fn get_inner(&self) -> &dyn IbcAndStargate {
         todo!()
     }
 
     fn mid_handle_outgoing_packet(
         &self,
-        api: &dyn cosmwasm_std::Api,
-        block: &cosmwasm_std::BlockInfo,
-        sender: cosmwasm_std::Addr,
-        router: &crate::router::RouterWrapper,
-        storage: std::rc::Rc<std::cell::RefCell<&mut dyn cosmwasm_std::Storage>>,
-        msg: cosmwasm_std::IbcMsg,
-        channel: crate::ibc::IbcChannelWrapper,
-    ) -> crate::error::AppResult<super::middleware::MiddlewareResponse<cw_multi_test::AppResponse>> {
-        todo!()
+        _api: &dyn Api,
+        _block: &BlockInfo,
+        _sender: Addr,
+        _router: &RouterWrapper,
+        _storage: Rc<RefCell<&mut dyn Storage>>,
+        _msg: IbcMsg,
+        _channel: IbcChannelWrapper,
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
     }
 
-    fn mid_packet_receive(
+    fn mid_packet_receive_before(
         &self,
-        api: &dyn cosmwasm_std::Api,
-        block: &cosmwasm_std::BlockInfo,
-        router: &crate::router::RouterWrapper,
-        storage: std::rc::Rc<std::cell::RefCell<&mut dyn cosmwasm_std::Storage>>,
-        msg: cosmwasm_std::IbcPacketReceiveMsg,
-    ) -> crate::error::AppResult<super::middleware::MiddlewareResponse<cw_multi_test::AppResponse>> {
+        api: &dyn Api,
+        _block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        packet: IbcPacketReceiveMsg,
+    ) -> AppResult<MiddlewareResponse<PacketReceiveResponse, PacketToNext>> {
+        let clos = || -> AppResult<MiddlewareResponse<PacketReceiveResponse, PacketToNext>> {
+            let mut data: FungibleTokenPacketData = from_json(&packet.packet.data)?;
+            if data.memo != "".to_string() {
+                serde_json::from_str::<MemoField<WasmField>>(&data.memo)?;
+
+                // Create ibc_hook_sender address;
+                let ibc_hook_sender = Addr::unchecked("addr");
+
+                data.receiver = ibc_hook_sender.to_string();
+
+                let forwarded_packet = IbcPacketReceiveMsg::new(
+                    IbcPacket::new(
+                        to_json_binary(&data)?,
+                        packet.packet.src.clone(),
+                        packet.packet.dest.clone(),
+                        packet.packet.sequence,
+                        packet.packet.timeout.clone(),
+                    ),
+                    packet.relayer.clone(),
+                );
+
+                Ok(MiddlewareResponse::Continue(PacketToNext {
+                    packet: forwarded_packet,
+                }))
+            } else {
+                Ok(MiddlewareResponse::Continue(PacketToNext {
+                    packet: packet.clone(),
+                }))
+            }
+        };
+
+        match clos() {
+            Ok(response) => Ok(response),
+            Err(err) => Ok(MiddlewareResponse::Continue(PacketToNext { packet })),
+        }
+    }
+
+    fn mid_packet_receive_after(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        original_packet: IbcPacketReceiveMsg,
+        forwarded_packet: IbcPacketReceiveMsg,
+        forwarded_response: PacketReceiveResponse,
+    ) -> AppResult<PacketReceiveResponse> {
         todo!()
     }
 
     fn mid_packet_ack(
         &self,
-        api: &dyn cosmwasm_std::Api,
-        block: &cosmwasm_std::BlockInfo,
-        router: &crate::router::RouterWrapper,
-        storage: std::rc::Rc<std::cell::RefCell<&mut dyn cosmwasm_std::Storage>>,
-        msg: cosmwasm_std::IbcPacketAckMsg,
-    ) -> crate::error::AppResult<super::middleware::MiddlewareResponse<cw_multi_test::AppResponse>> {
+        _api: &dyn Api,
+        _block: &BlockInfo,
+        _router: &RouterWrapper,
+        _storage: Rc<RefCell<&mut dyn Storage>>,
+        _msg: IbcPacketAckMsg,
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
         todo!()
     }
 
     fn mid_open_channel(
         &self,
-        api: &dyn cosmwasm_std::Api,
-        block: &cosmwasm_std::BlockInfo,
-        router: &crate::router::RouterWrapper,
-        storage: std::rc::Rc<std::cell::RefCell<&mut dyn cosmwasm_std::Storage>>,
-        msg: cosmwasm_std::IbcChannelOpenMsg,
-    ) -> crate::error::AppResult<super::middleware::MiddlewareResponse<cw_multi_test::AppResponse>> {
-        todo!()
+        _api: &dyn Api,
+        _block: &BlockInfo,
+        _router: &RouterWrapper,
+        _storage: Rc<RefCell<&mut dyn Storage>>,
+        _msg: IbcChannelOpenMsg,
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
     }
 
     fn mid_channel_connect(
         &self,
-        api: &dyn cosmwasm_std::Api,
-        block: &cosmwasm_std::BlockInfo,
-        router: &crate::router::RouterWrapper,
-        storage: std::rc::Rc<std::cell::RefCell<&mut dyn cosmwasm_std::Storage>>,
-        msg: cosmwasm_std::IbcChannelConnectMsg,
-    ) -> crate::error::AppResult<super::middleware::MiddlewareResponse<cw_multi_test::AppResponse>> {
-        todo!()
+        _api: &dyn Api,
+        _block: &BlockInfo,
+        _router: &RouterWrapper,
+        _storage: Rc<RefCell<&mut dyn Storage>>,
+        _msg: IbcChannelConnectMsg,
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MemoField<T> {
+    pub memo: T,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WasmField {
+    contract: String,
+    msg: Value,
 }
