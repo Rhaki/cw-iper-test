@@ -81,7 +81,7 @@ impl Channelable for u64 {
     }
 
     fn as_channel_number(&self) -> AppResult<u64> {
-        Ok(self.clone())
+        Ok(*self)
     }
 }
 
@@ -282,23 +282,23 @@ pub fn create_ibc_timeout(nanos: u64, height: Option<Height>) -> IbcTimeout {
     match (nanos, height) {
         (0, None) => unimplemented!(),
         (0, Some(height)) => {
-            return IbcTimeout::with_block(IbcTimeoutBlock {
+            IbcTimeout::with_block(IbcTimeoutBlock {
                 revision: height.revision_number,
                 height: height.revision_height,
-            });
+            })
         }
         (seconds, None) => {
-            return IbcTimeout::with_timestamp(Timestamp::from_nanos(seconds));
+            IbcTimeout::with_timestamp(Timestamp::from_nanos(seconds))
         }
 
         (seconds, Some(height)) => {
-            return IbcTimeout::with_both(
+            IbcTimeout::with_both(
                 IbcTimeoutBlock {
                     revision: height.revision_number,
                     height: height.revision_height,
                 },
                 Timestamp::from_nanos(seconds),
-            );
+            )
         }
     }
 }

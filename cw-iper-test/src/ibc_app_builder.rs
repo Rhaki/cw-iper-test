@@ -62,11 +62,12 @@ where
     StorageT: Storage,
 {
     fn with_ibc_app<T: IbcApplication + StargateApplication + 'static>(
-        self,
+        mut self,
         application: T,
     ) -> Self {
         let mut ibc = self.ibc;
         let mut stargate = self.stargate;
+        application.init(&self.api, &mut self.storage);
         let application = Rc::new(RefCell::new(application));
         let port_name = application.borrow().port_name();
 
@@ -109,7 +110,7 @@ impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, IbcT, GovT> AppB
 where
     StorageT: Storage,
 {
-    fn with_stargate_app<T: StargateApplication + 'static>(mut self, application: T) -> Self {
+    fn with_stargate_app<T: StargateApplication + 'static>(self, application: T) -> Self {
         let mut stargate = self.stargate;
         let application = Rc::new(RefCell::new(application));
         stargate.try_add_application(application.clone()).unwrap();

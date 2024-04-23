@@ -1,4 +1,4 @@
-use cw_iper_test_macros::{ urls_int, Stargate};
+use cw_iper_test_macros::{urls_int, Stargate};
 
 #[derive(Stargate)]
 #[stargate(name = "test", query_urls = TestQueryUrls, msgs_urls = TestMsgUrls)]

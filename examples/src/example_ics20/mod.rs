@@ -1,7 +1,11 @@
-use cosmwasm_std::{AnyMsg, Coin, CosmosMsg, IbcMsg, IbcOrder, IbcTimeout, Timestamp, Uint128};
+use cosmwasm_std::{
+    AnyMsg, BankQuery, Coin, CosmosMsg, IbcMsg, IbcOrder, IbcTimeout, QueryRequest, SupplyResponse,
+    Timestamp, Uint128,
+};
 use cw_iper_test::cw_multi_test::{
     no_init, AppBuilder, BankSudo, Executor, MockApiBech32, SudoMsg,
 };
+use cw_iper_test::ibc_applications::Ics20Helper;
 use cw_iper_test::{
     app_ext::AppExt as _,
     ecosystem::Ecosystem,
@@ -23,12 +27,12 @@ fn base_ics20_transfer() {
         .with_api(MockApiBech32::new("terra"))
         .with_ibc(IbcModule::default())
         .with_stargate(StargateModule::default())
-        .with_ibc_app(Ics20::default())
+        .with_ibc_app(Ics20)
         .build(no_init)
         .into_ibc_app("terra");
 
     let osmosis = IbcAppBuilder::new("osmo")
-        .with_ibc_app(Ics20::default())
+        .with_ibc_app(Ics20)
         .build(no_init)
         .into_ibc_app("osmosis");
 
@@ -95,14 +99,74 @@ fn base_ics20_transfer() {
 
     assert_eq!(balance.amount, Uint128::zero());
 
+    let supply = terra
+        .borrow()
+        .app
+        .wrap()
+        .query::<SupplyResponse>(&QueryRequest::Bank(BankQuery::Supply {
+            denom: "uluna".to_string(),
+        }))
+        .unwrap();
+
+    assert_eq!(supply.amount.amount, amount.amount);
+
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+
     let balance = osmosis
         .borrow()
         .app
         .wrap()
-        .query_balance(&receiver, "mock_denom")
+        .query_balance(&receiver, &ibc_denom)
         .unwrap();
 
-    assert_eq!(balance.amount, amount.amount)
+    assert_eq!(balance.amount, amount.amount);
+
+    // Send tokens back
+
+    let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
+        channel_id: "channel-0".to_string(),
+        to_address: sender.to_string(),
+        amount: Coin::new(amount.amount, &ibc_denom),
+        timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(123)),
+        memo: None,
+    });
+
+    osmosis
+        .borrow_mut()
+        .app
+        .execute(receiver.clone(), msg)
+        .unwrap();
+
+    eco.relay_all_packets().unwrap();
+
+    let balance = terra
+        .borrow()
+        .app
+        .wrap()
+        .query_balance(&sender, "uluna")
+        .unwrap();
+
+    assert_eq!(balance.amount, amount.amount);
+
+    let balance = osmosis
+        .borrow()
+        .app
+        .wrap()
+        .query_balance(&receiver, &ibc_denom)
+        .unwrap();
+
+    assert_eq!(balance.amount, Uint128::zero());
+
+    let supply = osmosis
+        .borrow()
+        .app
+        .wrap()
+        .query::<SupplyResponse>(&QueryRequest::Bank(BankQuery::Supply {
+            denom: ibc_denom.to_string(),
+        }))
+        .unwrap();
+
+    assert_eq!(supply.amount.amount, Uint128::zero());
 }
 
 #[test]
@@ -111,12 +175,12 @@ fn stargate_ics20_transfer() {
         .with_api(MockApiBech32::new("terra"))
         .with_ibc(IbcModule::default())
         .with_stargate(StargateModule::default())
-        .with_ibc_app(Ics20::default())
+        .with_ibc_app(Ics20)
         .build(no_init)
         .into_ibc_app("terra");
 
     let osmosis = IbcAppBuilder::new("osmo")
-        .with_ibc_app(Ics20::default())
+        .with_ibc_app(Ics20)
         .build(no_init)
         .into_ibc_app("osmosis");
 
@@ -211,12 +275,12 @@ fn failing_ics20_transfer() {
         .with_api(MockApiBech32::new("terra"))
         .with_ibc(IbcModule::default())
         .with_stargate(StargateModule::default())
-        .with_ibc_app(Ics20::default())
+        .with_ibc_app(Ics20)
         .build(no_init)
         .into_ibc_app("terra");
 
     let osmosis = IbcAppBuilder::new("osmo")
-        .with_ibc_app(Ics20::default())
+        .with_ibc_app(Ics20)
         .build(no_init)
         .into_ibc_app("osmosis");
 
@@ -272,7 +336,9 @@ fn failing_ics20_transfer() {
 
     terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
 
-    eco.relay_all_packets().unwrap();
+    let response = eco.relay_all_packets().unwrap();
+
+    println!("{:#?}", response);
 
     let balance = terra
         .borrow()
@@ -292,4 +358,3 @@ fn failing_ics20_transfer() {
 
     assert_eq!(balance.amount, Uint128::zero())
 }
-

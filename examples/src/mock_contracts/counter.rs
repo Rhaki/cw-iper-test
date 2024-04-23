@@ -3,12 +3,15 @@ use cosmwasm_std::{
     entry_point, Binary, Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse,
     IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
     IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, MessageInfo, Never, Reply,
-    Response, StdResult,
+    Response, StdError, StdResult,
 };
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ContractError {}
+pub enum ContractError {
+    #[error("{0}")]
+    Std(#[from] StdError),
+}
 
 #[cw_serde]
 pub struct InstantiateMsg {}
@@ -16,6 +19,7 @@ pub struct InstantiateMsg {}
 #[cw_serde]
 pub enum ExecuteMsg {
     SendPacket(IbcMsg),
+    JustReceive { msg: String, to_fail: bool },
 }
 
 #[cw_serde]
@@ -41,11 +45,21 @@ pub fn instantiate(
 pub fn execute(
     _deps: DepsMut,
     _env: Env,
-    _info: MessageInfo,
+    info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::SendPacket(msg) => Ok(Response::new().add_message(msg)),
+        ExecuteMsg::JustReceive { msg, to_fail } => {
+            if to_fail {
+                Err(ContractError::Std(StdError::generic_err(msg)))
+            } else {
+                Ok(Response::new()
+                    .add_attribute("sender", info.sender)
+                    .add_attribute("msg", msg)
+                    .add_attribute("coins", format!("{:#?}", info.funds)))
+            }
+        }
     }
 }
 

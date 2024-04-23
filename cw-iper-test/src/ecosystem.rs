@@ -1,8 +1,10 @@
 use crate::{
-    error::AppResult, ibc::IbcChannelCreator, ibc_app::IbcAppRef, ibc_module::IbcPacketType,
+    error::AppResult,
+    ibc::IbcChannelCreator,
+    ibc_app::{IbcAppRef, MayResponse},
+    ibc_module::IbcPacketType,
 };
 use anyhow::anyhow;
-use cw_multi_test::AppResponse;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 #[derive(Default)]
@@ -49,7 +51,7 @@ impl Ecosystem {
         Ok(())
     }
 
-    pub fn relay_all_packets(&self) -> AppResult<Vec<AppResponse>> {
+    pub fn relay_all_packets(&self) -> AppResult<Vec<MayResponse>> {
         let mut res = vec![];
 
         let mut finished = false;
@@ -69,7 +71,7 @@ impl Ecosystem {
         Ok(res)
     }
 
-    pub fn relay_next_packet(&self, chain_id: impl Into<String> + Clone) -> AppResult<AppResponse> {
+    pub fn relay_next_packet(&self, chain_id: impl Into<String> + Clone) -> AppResult<MayResponse> {
         let app = self.get_app(chain_id.clone())?;
         let packet_id = app.borrow().get_next_pending_packet()?;
         self.relay_packet(chain_id, packet_id)
@@ -79,7 +81,7 @@ impl Ecosystem {
         &self,
         chain_id: impl Into<String>,
         packet_id: u64,
-    ) -> AppResult<AppResponse> {
+    ) -> AppResult<MayResponse> {
         let app_src = self.get_app(chain_id)?;
 
         let packet = app_src.borrow().get_pending_packet(packet_id)?;

@@ -1,4 +1,5 @@
 pub mod app_ext;
+pub mod chain_helper;
 pub mod contracts;
 pub mod ecosystem;
 pub mod error;

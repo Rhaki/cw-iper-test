@@ -5,12 +5,12 @@ use cosmwasm_std::{
     IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::AppResponse;
-use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     error::AppResult,
     ibc::IbcChannelWrapper,
-    ibc_application::{IbcApplication, IbcPortInterface, PacketReceiveResponse},
+    ibc_app::InfallibleResult,
+    ibc_application::{IbcApplication, IbcPortInterface, PacketReceiveFailing, PacketReceiveOk},
     response::AppResponseExt,
     router::RouterWrapper,
     stargate::{StargateApplication, StargateName, StargateUrls},
@@ -50,7 +50,7 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         packet: IbcPacketReceiveMsg,
-    ) -> AppResult<MiddlewareResponse<PacketReceiveResponse, PacketToNext>>;
+    ) -> InfallibleResult<MiddlewareResponse<PacketReceiveOk, PacketToNext>, PacketReceiveFailing>;
 
     fn mid_packet_receive_after(
         &self,
@@ -60,8 +60,8 @@ pub trait Middleware {
         storage: Rc<RefCell<&mut dyn Storage>>,
         original_packet: IbcPacketReceiveMsg,
         forwarded_packet: IbcPacketReceiveMsg,
-        forwarded_response: PacketReceiveResponse,
-    ) -> AppResult<PacketReceiveResponse>;
+        forwarded_response: PacketReceiveOk,
+    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing>;
 
     fn mid_packet_ack(
         &self,
@@ -102,8 +102,12 @@ where
 
 impl<T> IbcApplication for T
 where
-    T: Middleware + StargateUrls + Serialize + DeserializeOwned + 'static,
+    T: Middleware + StargateUrls + 'static,
 {
+    fn init(&self, api: &cw_multi_test::MockApiBech32, storage: &mut dyn Storage) {
+        self.get_inner().init(api, storage)
+    }
+
     fn handle_outgoing_packet(
         &self,
         api: &dyn Api,
@@ -140,35 +144,40 @@ where
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         original_packet: IbcPacketReceiveMsg,
-    ) -> AppResult<PacketReceiveResponse> {
+    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing> {
         match self.mid_packet_receive_before(
             api,
             block,
             router,
             storage.clone(),
             original_packet.clone(),
-        )? {
-            MiddlewareResponse::Stop(response) => Ok(response),
-            MiddlewareResponse::Continue(next_packet) => {
-                let sub_response = self.get_inner().packet_receive(
-                    api,
-                    block,
-                    router,
-                    storage.clone(),
-                    next_packet.packet.clone(),
-                )?;
+        ) {
+            InfallibleResult::Ok(res) => match res {
+                MiddlewareResponse::Stop(res) => InfallibleResult::Ok(res),
+                MiddlewareResponse::Continue(next_packet) => {
+                    let sub_response = self.get_inner().packet_receive(
+                        api,
+                        block,
+                        router,
+                        storage.clone(),
+                        next_packet.packet.clone(),
+                    );
 
-                let after_response = self.mid_packet_receive_after(
-                    api,
-                    block,
-                    router,
-                    storage,
-                    original_packet,
-                    next_packet.packet,
-                    sub_response,
-                )?;
-                Ok(after_response)
-            }
+                    match sub_response {
+                        InfallibleResult::Ok(sub_response) => self.mid_packet_receive_after(
+                            api,
+                            block,
+                            router,
+                            storage,
+                            original_packet,
+                            next_packet.packet,
+                            sub_response,
+                        ),
+                        InfallibleResult::Err(err) => InfallibleResult::Err(err),
+                    }
+                }
+            },
+            InfallibleResult::Err(err) => InfallibleResult::Err(err),
         }
     }
 
@@ -241,7 +250,7 @@ where
 
 impl<T> StargateApplication for T
 where
-    T: Middleware + StargateUrls + Serialize + DeserializeOwned + 'static,
+    T: Middleware + StargateUrls + 'static,
 {
     fn stargate_msg(
         &self,
@@ -295,3 +304,5 @@ where
         self.get_inner().type_urls()
     }
 }
+
+impl<T> IbcAndStargate for T where T: IbcApplication + StargateApplication {}

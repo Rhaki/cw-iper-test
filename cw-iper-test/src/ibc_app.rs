@@ -6,7 +6,8 @@ use cosmwasm_std::{
     IbcPacket, IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::{
-    transactional, App, AppResponse, Bank, Distribution, Gov, Module, Staking, Stargate, Wasm,
+    transactional, App, AppResponse, Bank, Distribution, Gov, Module, Staking, Stargate,
+    StorageTransaction, Wasm,
 };
 use serde::de::DeserializeOwned;
 
@@ -185,9 +186,9 @@ where
         Ok(())
     }
 
-    pub fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<AppResponse> {
+    pub fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<MayResponse> {
         match packet {
-            IbcPacketType::AckPacket(packet) => self.packet_ack(packet),
+            IbcPacketType::AckPacket(packet) => Ok(MayResponse::Ok(self.packet_ack(packet)?)),
             IbcPacketType::OutgoingPacket(packet) => self.packet_receive(packet),
             IbcPacketType::OutgoinPacketRaw(packet) => {
                 let channel = self
@@ -198,12 +199,11 @@ where
 
                 self.packet_receive(packet.into_full_packet(&channel)?)
             }
-
             IbcPacketType::CloseChannel { .. } => unimplemented!("Close channel is unimplemented"),
         }
     }
 
-    pub fn packet_receive(&mut self, packet: OutgoingPacket) -> AppResult<AppResponse> {
+    pub fn packet_receive(&mut self, packet: OutgoingPacket) -> AppResult<MayResponse> {
         let mut channels = self.channels.borrow_mut();
 
         let channel = channels.get_mut(packet.dest.channel_id.clone())?;
@@ -249,16 +249,36 @@ where
                     )?;
                 }
 
-                Ok(response)
+                Ok(MayResponse::Ok(response))
             }
             IbcPort::Module(name) => {
                 let (api, store, block, router) = self.app.use_parts();
 
-                transactional(&mut *store, |write_cache, _| {
-                    router
-                        .ibc
-                        .packet_receive(&*api, write_cache, router, &*block, name, msg)
-                })
+                let (ack, result) = match infallible_transactional(&mut *store, |write_cache, _| {
+                    router.ibc.packet_receive(
+                        &*api,
+                        write_cache,
+                        router,
+                        &*block,
+                        name,
+                        msg.clone(),
+                    )
+                }) {
+                    InfallibleResult::Ok(data) => (data.ack, MayResponse::Ok(data.response)),
+                    InfallibleResult::Err(data) => (data.ack, MayResponse::Err(data.error)),
+                };
+
+                if let Some(ack) = ack {
+                    emit_packet(
+                        IbcPacketType::AckPacket(AckPacket {
+                            ack,
+                            original_packet: msg,
+                        }),
+                        self.app.storage_mut(),
+                    )?;
+                }
+
+                Ok(result)
             }
         }
     }
@@ -316,7 +336,7 @@ pub trait IbcAppRef {
         remote: &IbcChannelCreator,
         sequence: Rc<RefCell<u64>>,
     ) -> AppResult<IbcChannelWrapper>;
-    fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<AppResponse>;
+    fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<MayResponse>;
     fn remove_packet(&mut self, packet_id: u64) -> AppResult<()>;
     fn some_pending_packets(&self) -> bool;
     fn get_channel_info(&self, local_channel_id: String) -> AppResult<IbcChannelWrapper>;
@@ -366,7 +386,7 @@ where
         self.open_channel(local, remote, sequence)
     }
 
-    fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<AppResponse> {
+    fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<MayResponse> {
         self.incoming_packet(packet)
     }
 
@@ -381,4 +401,32 @@ where
     fn get_channel_info(&self, local_channel_id: String) -> AppResult<IbcChannelWrapper> {
         self.channels.borrow().get(local_channel_id).cloned()
     }
+}
+
+pub fn infallible_transactional<F, T, E>(
+    base: &mut dyn Storage,
+    action: F,
+) -> InfallibleResult<T, E>
+where
+    F: FnOnce(&mut dyn Storage, &dyn Storage) -> InfallibleResult<T, E>,
+{
+    let mut cache = StorageTransaction::new(base);
+    let res = action(&mut cache, base);
+
+    if let InfallibleResult::Ok(_) = res {
+        cache.prepare().commit(base);
+    }
+
+    res
+}
+
+pub enum InfallibleResult<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+#[derive(Debug)]
+pub enum MayResponse {
+    Ok(AppResponse),
+    Err(String),
 }

@@ -1,8 +1,9 @@
-use std::{cell::{Ref, RefCell}, collections::BTreeMap, rc::Rc, u64};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, u64};
 
 use crate::{
     ibc::IbcChannelWrapper,
-    ibc_application::IbcApplication,
+    ibc_app::InfallibleResult,
+    ibc_application::{IbcApplication, PacketReceiveFailing, PacketReceiveOk},
     router::{RouterWrapper, UseRouter, UseRouterResponse},
 };
 
@@ -82,13 +83,15 @@ impl IbcModule {
     {
         let rc_storage = Rc::new(RefCell::new(storage));
 
-        self.load_application(application)?.borrow().channel_connect(
-            api,
-            block,
-            &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
-            rc_storage.clone(),
-            msg,
-        )
+        self.load_application(application)?
+            .borrow()
+            .channel_connect(
+                api,
+                block,
+                &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
+                rc_storage.clone(),
+                msg,
+            )
     }
 
     pub fn packet_receive<ExecC, QueryC>(
@@ -99,30 +102,23 @@ impl IbcModule {
         block: &BlockInfo,
         application: &str,
         packet: IbcPacketReceiveMsg,
-    ) -> AppResult<AppResponse>
+    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing>
     where
         ExecC: CustomMsg + DeserializeOwned + 'static,
         QueryC: CustomQuery + DeserializeOwned + 'static,
     {
         let rc_storage = Rc::new(RefCell::new(storage));
 
-        let result = self.load_application(application)?.borrow().packet_receive(
-            api,
-            block,
-            &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
-            rc_storage.clone(),
-            packet.clone(),
-        )?;
-
-        emit_packet_boxed(
-            IbcPacketType::AckPacket(AckPacket {
-                ack: result.ack,
-                original_packet: packet,
-            }),
-            &rc_storage,
-        )?;
-
-        Ok(result.response)
+        self.load_application(application)
+            .unwrap()
+            .borrow()
+            .packet_receive(
+                api,
+                block,
+                &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
+                rc_storage.clone(),
+                packet.clone(),
+            )
     }
 
     pub fn packet_ack<ExecC, QueryC>(
@@ -172,15 +168,17 @@ impl Module for IbcModule {
         let rc_storage = Rc::new(RefCell::new(storage));
 
         if let IbcPort::Module(name) = &channel.local.port {
-            self.load_application(name)?.borrow().handle_outgoing_packet(
-                api,
-                block,
-                sender,
-                &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
-                rc_storage.clone(),
-                msg.clone(),
-                channel,
-            )
+            self.load_application(name)?
+                .borrow()
+                .handle_outgoing_packet(
+                    api,
+                    block,
+                    sender,
+                    &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
+                    rc_storage.clone(),
+                    msg.clone(),
+                    channel,
+                )
         } else {
             emit_packet_boxed(msg.into_packet(&sender, &channel)?, &rc_storage)?;
             Ok(AppResponse::default())

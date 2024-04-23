@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::anyhow;
+use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     from_json, to_json_binary, Addr, Api, BankMsg, Binary, BlockInfo, Coin, CosmosMsg, Empty,
     GrpcQuery, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
@@ -9,12 +11,15 @@ use cosmwasm_std::{
 use cw_iper_test_macros::{urls_int, IbcPort, Stargate};
 use cw_multi_test::{AppResponse, BankSudo, SudoMsg};
 
+use cw_storage_plus::Item;
 use ibc_proto::ibc::apps::transfer::v1::MsgTransfer;
 use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::ibc::create_ibc_timeout;
-use crate::ibc_application::{IbcApplication, PacketReceiveResponse};
+use crate::ibc_app::InfallibleResult;
+use crate::ibc_application::{IbcApplication, PacketReceiveFailing, PacketReceiveOk};
 use crate::ibc_module::{emit_packet_boxed, IbcPacketType, OutgoingPacket, OutgoingPacketRaw};
 
 use crate::{
@@ -38,6 +43,12 @@ pub enum Ics20MsgUrls {
 pub enum Ics20QueryUrls {}
 
 impl IbcApplication for Ics20 {
+    fn init(&self, api: &cw_multi_test::MockApiBech32, storage: &mut dyn Storage) {
+        let db = Ics20Db::new(api.addr_make("ics20_addr_container"));
+
+        ICS20DB.save(storage, &db).unwrap();
+    }
+
     fn handle_outgoing_packet(
         &self,
         _api: &dyn Api,
@@ -48,7 +59,7 @@ impl IbcApplication for Ics20 {
         msg: IbcMsg,
         channel: IbcChannelWrapper,
     ) -> AppResult<AppResponse> {
-        let (data, timeout) = match msg {
+        let (mut data, timeout) = match msg {
             IbcMsg::Transfer {
                 to_address,
                 amount,
@@ -74,15 +85,36 @@ impl IbcApplication for Ics20 {
             _ => todo!(),
         };
 
-        let response = router.execute(
-            sender,
-            CosmosMsg::<Empty>::Bank(BankMsg::Burn {
-                amount: vec![Coin::new(
-                    Uint128::from_str(&data.amount)?,
-                    data.denom.clone(),
-                )],
-            }),
-        )?;
+        let db = ICS20DB.load(*storage.borrow())?;
+
+        let (packet_denom, is_local) = db.handle_outgoing(&data.denom);
+
+        let response = if is_local {
+            
+
+            router.execute(
+                sender,
+                CosmosMsg::<Empty>::Bank(BankMsg::Send {
+                    to_address: db.address_container.to_string(),
+                    amount: vec![Coin::new(
+                        Uint128::from_str(&data.amount)?,
+                        data.denom.clone(),
+                    )],
+                }),
+            )?
+        } else {
+            router.execute(
+                sender,
+                CosmosMsg::<Empty>::Bank(BankMsg::Burn {
+                    amount: vec![Coin::new(
+                        Uint128::from_str(&data.amount)?,
+                        data.denom.clone(),
+                    )],
+                }),
+            )?
+        };
+
+        data.denom = packet_denom;
 
         emit_packet_boxed(
             IbcPacketType::OutgoingPacket(OutgoingPacket {
@@ -104,28 +136,44 @@ impl IbcApplication for Ics20 {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcPacketReceiveMsg,
-    ) -> AppResult<PacketReceiveResponse> {
+    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing> {
         let clos = || {
             let data: FungibleTokenPacketData = from_json(&msg.packet.data)?;
 
+            let mut db = ICS20DB.load(*storage.borrow())?;
+
+            let (denom, is_local) = db.handle_incoming(msg, *storage.borrow_mut())?;
+
             let to = api.addr_validate(&data.receiver)?;
 
-            let coin = Coin::new(Uint128::from_str(&data.amount)?, "mock_denom".to_string());
+            let coin = Coin::new(Uint128::from_str(&data.amount)?, denom);
 
-            router.sudo(SudoMsg::Bank(BankSudo::Mint {
-                to_address: to.to_string(),
-                amount: vec![coin],
-            }))
+            // Escrow the funds
+            if is_local {
+                router.execute(
+                    db.address_container.clone(),
+                    CosmosMsg::<Empty>::Bank(BankMsg::Send {
+                        to_address: to.to_string(),
+                        amount: vec![coin.clone()],
+                    }),
+                )
+            // Mint new token
+            } else {
+                router.sudo(SudoMsg::Bank(BankSudo::Mint {
+                    to_address: to.to_string(),
+                    amount: vec![coin],
+                }))
+            }
         };
 
         match clos() {
-            Ok(response) => Ok(PacketReceiveResponse {
-                response: AppResponse::default(),
-                ack: to_json_binary(&FungibleTokenPacketAck::Ok)?,
+            Ok(response) => InfallibleResult::Ok(PacketReceiveOk {
+                response,
+                ack: Some(to_json_binary(&FungibleTokenPacketAck::Ok).unwrap()),
             }),
-            Err(err) => Ok(PacketReceiveResponse {
-                response: AppResponse::default(),
-                ack: to_json_binary(&FungibleTokenPacketAck::Err(err.to_string()))?,
+            Err(err) => InfallibleResult::Err(PacketReceiveFailing {
+                error: err.to_string(),
+                ack: Some(to_json_binary(&FungibleTokenPacketAck::Err(err.to_string())).unwrap()),
             }),
         }
     }
@@ -241,7 +289,104 @@ impl StargateApplication for Ics20 {
 }
 
 #[derive(Serialize, Deserialize)]
-enum FungibleTokenPacketAck {
+pub enum FungibleTokenPacketAck {
     Ok,
     Err(String),
+}
+
+pub const ICS20DB: Item<Ics20Db> = Item::new("ics20_db");
+
+#[cw_serde]
+pub struct Ics20Db {
+    pub incoming_denoms: BTreeMap<IbcDenom, Trace>,
+    pub address_container: Addr,
+}
+
+impl Ics20Db {
+    pub fn new(address_container: Addr) -> Self {
+        Self {
+            address_container,
+            incoming_denoms: BTreeMap::new(),
+        }
+    }
+
+    pub fn handle_outgoing(&self, denom: &str) -> (String, bool) {
+        if denom.starts_with("ibc/") {
+            let trace = self.incoming_denoms.get(denom).unwrap();
+            (trace.clone(), false)
+        } else {
+            (denom.to_string(), true)
+        }
+    }
+
+    pub fn handle_incoming(
+        &mut self,
+        msg: IbcPacketReceiveMsg,
+        storage: &mut dyn Storage,
+    ) -> AppResult<(String, bool)> {
+        let (denom, is_local) = self.denom_from_packet(&msg)?;
+
+        ICS20DB.save(storage, self)?;
+
+        Ok((denom, is_local))
+    }
+
+    pub fn denom_from_packet(&mut self, msg: &IbcPacketReceiveMsg) -> AppResult<(String, bool)> {
+        let data: FungibleTokenPacketData = from_json(&msg.packet.data)?;
+
+        let src_trace = format!("{}/{}/", msg.packet.src.port_id, msg.packet.src.channel_id);
+
+        match data.denom.strip_prefix(&src_trace) {
+            // Has been sent from this chain
+            Some(original_denom) => {
+                let denom = if original_denom.starts_with("transfer/") {
+                    Ics20Helper::compute_ibc_denom_from_trace(original_denom)
+                } else {
+                    original_denom.to_string()
+                };
+
+                Ok((denom, true))
+            }
+            // Not sent from this chain
+            None => {
+                let new_trace = format!(
+                    "{}/{}/{}",
+                    msg.packet.dest.port_id, msg.packet.dest.channel_id, data.denom
+                );
+                let denom = Ics20Helper::compute_ibc_denom_from_trace(&new_trace);
+                self.incoming_denoms.insert(denom.clone(), new_trace);
+
+                Ok((denom, false))
+            }
+        }
+    }
+}
+
+type IbcDenom = String;
+
+type Trace = String;
+
+pub struct Ics20Helper;
+
+impl Ics20Helper {
+    pub fn compute_ibc_denom_from_trace(trace: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(trace);
+        format!("ibc/{}", format!("{:x}", hasher.finalize()).to_uppercase())
+    }
+}
+
+#[test]
+#[rustfmt::skip]
+fn test_path() {
+    let path = "transfer/channel-6";
+    let base_denom = "uusdc";
+    let denom = Ics20Helper::compute_ibc_denom_from_trace(&format!("{}/{}",path, base_denom));
+    assert_eq!(denom, "ibc/B3504E092456BA618CC28AC671A71FB08C6CA0FD0BE7C8A5B5A3E2DD933CC9E4");
+
+    let path = "transfer/channel-0/transfer/channel-141/transfer/channel-42/transfer/channel-27";
+    let base_denom = "uluna";
+    let denom = Ics20Helper::compute_ibc_denom_from_trace(&format!("{}/{}",path, base_denom));
+
+    println!("{}", denom);
 }

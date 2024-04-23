@@ -5,6 +5,7 @@ use cw_multi_test::{App, Bank, Distribution, Gov, MockApiBech32, Module, Staking
 use serde::de::DeserializeOwned;
 
 use crate::{
+    chain_helper::ChainHelper,
     ibc_app::{IbcApp, SharedChannels},
     ibc_module::IbcModule,
 };
@@ -70,7 +71,7 @@ where
     StargateT: Stargate,
 {
     fn into_ibc_app(
-        self,
+        mut self,
         chain_id: impl Into<String>,
     ) -> Rc<
         RefCell<
@@ -89,6 +90,12 @@ where
         >,
     > {
         let channels: SharedChannels = self.read_module(|router, _, _| router.ibc.channels.clone());
+
+        let chain_prefix = self.api().prefix().to_string();
+        ChainHelper { chain_prefix }
+            .save(self.storage_mut())
+            .unwrap();
+
         Rc::new(RefCell::new(IbcApp {
             relayer: self.api().addr_make("default_relayer"),
             chain_id: chain_id.into(),

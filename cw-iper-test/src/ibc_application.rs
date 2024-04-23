@@ -4,9 +4,11 @@ use cosmwasm_std::{
     Addr, Api, Binary, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
     IbcPacketReceiveMsg, Storage,
 };
-use cw_multi_test::AppResponse;
+use cw_multi_test::{AppResponse, MockApiBech32};
 
-use crate::{error::AppResult, ibc::IbcChannelWrapper, router::RouterWrapper};
+use crate::{
+    error::AppResult, ibc::IbcChannelWrapper, ibc_app::InfallibleResult, router::RouterWrapper,
+};
 pub trait IbcApplication: IbcPortInterface {
     fn handle_outgoing_packet(
         &self,
@@ -26,7 +28,7 @@ pub trait IbcApplication: IbcPortInterface {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcPacketReceiveMsg,
-    ) -> AppResult<PacketReceiveResponse>;
+    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing>;
 
     fn packet_ack(
         &self,
@@ -54,13 +56,20 @@ pub trait IbcApplication: IbcPortInterface {
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcChannelConnectMsg,
     ) -> AppResult<AppResponse>;
+
+    fn init(&self, api: &MockApiBech32, storage: &mut dyn Storage);
 }
 
 pub trait IbcPortInterface {
     fn port_name(&self) -> String;
 }
 
-pub struct PacketReceiveResponse {
+pub struct PacketReceiveOk {
     pub response: AppResponse,
-    pub ack: Binary,
+    pub ack: Option<Binary>,
+}
+
+pub struct PacketReceiveFailing {
+    pub error: String,
+    pub ack: Option<Binary>,
 }
