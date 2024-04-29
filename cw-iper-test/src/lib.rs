@@ -9,14 +9,13 @@ pub mod ibc_app_builder;
 pub mod ibc_application;
 pub mod ibc_applications;
 pub mod ibc_module;
+pub mod middleware;
 pub mod response;
 pub mod router;
 pub mod stargate;
 
+pub use anyhow;
 pub use cw_multi_test;
-// pub use cw_iper_test_macros;
-
-pub mod exports {
-    pub use strum;
-    pub use strum_macros;
-}
+pub use serde_json;
+pub use strum;
+pub use strum_macros;

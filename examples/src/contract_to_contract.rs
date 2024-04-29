@@ -13,7 +13,7 @@ use cw_iper_test::{
 use crate::mock_contracts::counter;
 
 #[test]
-fn example_contract_to_contract() {
+fn contract_to_contract() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
         .with_ibc(IbcModule::default())
@@ -107,7 +107,9 @@ fn example_contract_to_contract() {
     let msg = IbcMsg::SendPacket {
         channel_id: "channel-0".to_string(),
         data: to_json_binary("some_ack").unwrap(),
-        timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(10)),
+        timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(
+            osmosis.borrow().app.block_info().time.seconds() + 1,
+        )),
     };
 
     terra
@@ -121,11 +123,7 @@ fn example_contract_to_contract() {
         )
         .unwrap();
 
-    eco.relay_all_packets().unwrap();
+    let res = eco.relay_all_packets().unwrap();
 
-    let pending = eco.get_all_pending_packets();
-
-    println!("{pending:#?}")
-
-    // println!("{pending_packets:#?}")
+    println!("{:#?}", res);
 }

@@ -1,5 +1,9 @@
 [workspace]
-members             = ["cw-iper-test", "cw-iper-test-macros", "examples", "test_imports"]
+members             = [
+                        "cw-iper-test",
+                        "cw-iper-test-macros",
+                        "examples"
+                    ]
 
 [workspace.package]
 version             = "0.1.0"
@@ -18,8 +22,8 @@ serde               = "1.0.197"
 thiserror           = "1.0.58"
 ibc                 = "0.51.0"
 ibc-proto           = "0.42.2"
-cw-iper-test-macros = { path = "cw-iper-test-macros" }
 cw-iper-test        = { path = "cw-iper-test" }
+cw-iper-test-macros = { path = "cw-iper-test-macros" }
 sha2                = "0.10.8"
 strum               = "0.26.1"
 strum_macros        = "0.26"

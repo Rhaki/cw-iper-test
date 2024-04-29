@@ -19,6 +19,9 @@ use sha2::{Digest, Sha256};
 
 use crate::ibc_app::InfallibleResult;
 use crate::ibc_application::PacketReceiveFailing;
+use crate::middleware::{
+    IbcAndStargate, Middleware, MiddlewareResponse, MiddlewareUniqueResponse, PacketToNext,
+};
 use crate::response::AppResponseExt;
 use crate::{
     chain_helper::ChainHelper, error::AppResult, ibc::IbcChannelWrapper,
@@ -26,9 +29,6 @@ use crate::{
 };
 
 use super::ics20::FungibleTokenPacketAck;
-use super::middleware::{
-    IbcAndStargate, Middleware, MiddlewareResponse, MiddlewareUniqueResponse, PacketToNext,
-};
 
 pub struct IbcHook {
     pub inner: Box<dyn IbcAndStargate>,
@@ -198,6 +198,17 @@ impl Middleware for IbcHook {
         _router: &RouterWrapper,
         _storage: Rc<RefCell<&mut dyn Storage>>,
         _msg: IbcChannelConnectMsg,
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
+    }
+
+    fn mid_packet_timeout(
+        &self,
+        _api: &dyn Api,
+        _block: &BlockInfo,
+        _router: &RouterWrapper,
+        _storage: Rc<RefCell<&mut dyn Storage>>,
+        _msg: cosmwasm_std::IbcPacketTimeoutMsg,
     ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
         Ok(MiddlewareResponse::Continue(AppResponse::default()))
     }

@@ -13,7 +13,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     from_json, Addr, Api, Binary, BlockInfo, CustomMsg, CustomQuery, Empty, IbcAcknowledgement,
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcQuery, IbcTimeout, Querier, Storage,
+    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcQuery, IbcTimeout, Querier, Storage,
 };
 use cw_multi_test::{AppResponse, CosmosRouter, Ibc, Module};
 use cw_storage_plus::Item;
@@ -144,6 +144,30 @@ impl IbcModule {
             msg,
         )
     }
+
+    pub fn packet_timeout<ExecC, QueryC>(
+        &self,
+        api: &dyn Api,
+        storage: &mut dyn Storage,
+        router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
+        block: &BlockInfo,
+        application: &str,
+        msg: IbcPacketTimeoutMsg,
+    ) -> AppResult<AppResponse>
+    where
+        ExecC: CustomMsg + DeserializeOwned + 'static,
+        QueryC: CustomQuery + DeserializeOwned + 'static,
+    {
+        let rc_storage = Rc::new(RefCell::new(storage));
+
+        self.load_application(application)?.borrow().packet_timeout(
+            api,
+            block,
+            &RouterWrapper::new(&router_closure!(router, api, rc_storage, block)),
+            rc_storage.clone(),
+            msg,
+        )
+    }
 }
 
 impl Module for IbcModule {
@@ -220,6 +244,7 @@ pub enum IbcPacketType {
     OutgoingPacket(OutgoingPacket),
     OutgoinPacketRaw(OutgoingPacketRaw),
     CloseChannel { channel_id: String },
+    Timeout(OutgoingPacket),
 }
 
 impl IbcPacketType {
@@ -233,6 +258,7 @@ impl IbcPacketType {
             IbcPacketType::OutgoinPacketRaw(..) => {
                 bail!("Unexpected error: Channel to deliver can't set for CloseChannel")
             }
+            IbcPacketType::Timeout(packet) => Ok(packet.src.channel_id.clone()),
         }
     }
 
@@ -244,6 +270,7 @@ impl IbcPacketType {
             IbcPacketType::OutgoingPacket(packet) => packet.src.channel_id.clone(),
             IbcPacketType::CloseChannel { channel_id } => channel_id.clone(),
             IbcPacketType::OutgoinPacketRaw(packet) => packet.src_channel.clone(),
+            IbcPacketType::Timeout(packet) => packet.dest.channel_id.clone(),
         }
     }
 }
@@ -298,6 +325,10 @@ impl OutgoingPacket {
     pub fn get_dest_channel(&self) -> String {
         self.dest.channel_id.clone()
     }
+
+    pub fn get_src_channel(&self) -> String {
+        self.src.channel_id.clone()
+    }
 }
 
 pub fn emit_packet_boxed(
@@ -313,10 +344,10 @@ pub fn emit_packet_boxed(
     Ok(())
 }
 
-pub fn emit_packet(packet: IbcPacketType, rc_storage: &mut dyn Storage) -> AppResult<()> {
-    let mut packets = PENDING_PACKETS.load(rc_storage).unwrap_or_default();
+pub fn emit_packet(packet: IbcPacketType, storage: &mut dyn Storage) -> AppResult<()> {
+    let mut packets = PENDING_PACKETS.load(storage).unwrap_or_default();
     let new_key = packets.last_key_value().map(|(k, _)| *k).unwrap_or(0) + 1;
     packets.insert(new_key, packet);
-    PENDING_PACKETS.save(rc_storage, &packets)?;
+    PENDING_PACKETS.save(storage, &packets)?;
     Ok(())
 }

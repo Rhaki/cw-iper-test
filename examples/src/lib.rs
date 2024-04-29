@@ -1,9 +1,9 @@
 #[cfg(test)]
-mod example_contract_to_contract;
+mod contract_to_contract;
 #[cfg(test)]
-mod example_ics20;
+mod ics20;
 #[cfg(test)]
 mod mock_contracts;
 
 #[cfg(test)]
-mod example_ibc_hook;
+mod ibc_hook;

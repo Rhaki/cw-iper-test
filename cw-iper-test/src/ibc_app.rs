@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 use anyhow::{anyhow, bail};
 use cosmwasm_std::{
     Addr, Api, Binary, CustomMsg, CustomQuery, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcPacket, IbcPacketReceiveMsg, Storage,
+    IbcPacket, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage,
 };
 use cw_multi_test::{
     transactional, App, AppResponse, Bank, Distribution, Gov, Module, Staking, Stargate,
@@ -199,6 +199,7 @@ where
 
                 self.packet_receive(packet.into_full_packet(&channel)?)
             }
+            IbcPacketType::Timeout(packet) => Ok(MayResponse::Ok(self.packet_timeout(packet)?)),
             IbcPacketType::CloseChannel { .. } => unimplemented!("Close channel is unimplemented"),
         }
     }
@@ -209,6 +210,14 @@ where
         let channel = channels.get_mut(packet.dest.channel_id.clone())?;
 
         *channel.sequence.borrow_mut() += 1;
+
+        if let Err(err) = self.check_timeout(&packet) {
+            emit_packet(
+                IbcPacketType::Timeout(packet.clone()),
+                self.app.storage_mut(),
+            )?;
+            return Ok(MayResponse::Err(err.to_string()));
+        }
 
         let msg = IbcPacketReceiveMsg::new(
             IbcPacket::new(
@@ -318,8 +327,83 @@ where
         }
     }
 
+    pub fn packet_timeout(&mut self, packet: OutgoingPacket) -> AppResult<AppResponse> {
+        let channel = packet.get_src_channel();
+
+        let channels = self.channels.borrow();
+
+        let channel = channels.get(channel)?;
+
+        let msg = IbcPacketTimeoutMsg::new(
+            IbcPacket::new(
+                packet.data.clone(),
+                channel.local.as_endpoint()?,
+                channel.remote.as_endpoint()?,
+                *channel.sequence.borrow(),
+                packet.timeout.clone(),
+            ),
+            self.relayer.clone(),
+        );
+
+        match &channel.local.port {
+            IbcPort::Contract(contract) => {
+                let code_id = self.app.contract_data(contract)?.code_id;
+                let ibc_details = self
+                    .code_ids
+                    .get(&code_id)
+                    .ok_or(anyhow!("Code ID not found"))?;
+
+                self.app.use_contract(contract, |deps, env| {
+                    ibc_details
+                        .ibc_packet_timeout(deps, env, msg.clone())
+                        .into_app_response()
+                })
+            }
+            IbcPort::Module(name) => {
+                let (api, store, block, router) = self.app.use_parts();
+
+                transactional(&mut *store, |write_cache, _| {
+                    router
+                        .ibc
+                        .packet_timeout(&*api, write_cache, router, &*block, name, msg.clone())
+                })
+
+            },
+        }
+    }
+
     pub fn get_next_channel_id(&self) -> u64 {
         self.channels.borrow().next_key()
+    }
+
+    fn check_timeout(&self, packet: &OutgoingPacket) -> AppResult<()> {
+        let height = packet
+            .timeout
+            .block()
+            .map(|val| val.height)
+            .unwrap_or_default();
+
+        let nanos = packet
+            .timeout
+            .timestamp()
+            .map(|val| val.nanos())
+            .unwrap_or_default();
+
+        let invalid = match (height, nanos) {
+            (0, 0) => true,
+            (0, nanos) => self.app.block_info().time.nanos() > nanos,
+            (height, 0) => self.app.block_info().height > height,
+            (height, nanos) => {
+                !(self.app.block_info().time.nanos() > nanos
+                    && self.app.block_info().height > height)
+            }
+        };
+
+        if invalid {
+            bail!("Packet has timed out");
+        } else {
+            Ok(())
+        }
     }
 }
 

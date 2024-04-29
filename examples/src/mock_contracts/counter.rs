@@ -141,9 +141,9 @@ pub fn ibc_packet_receive(
 pub fn ibc_packet_ack(
     _deps: DepsMut,
     _env: Env,
-    msg: IbcPacketAckMsg,
+    _msg: IbcPacketAckMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
-    println!("Packet_ack: {:?}", msg);
+    // println!("Packet_ack: {:?}", msg);
     Ok(IbcBasicResponse::default())
 }
 
@@ -154,5 +154,6 @@ pub fn ibc_packet_timeout(
     _env: Env,
     _msg: IbcPacketTimeoutMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
-    unimplemented!();
+    // println!("Packet_timeout: {:?}", msg);
+    Ok(IbcBasicResponse::default())
 }

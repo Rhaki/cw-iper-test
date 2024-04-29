@@ -281,24 +281,19 @@ impl IbcMsgExt for IbcMsg {
 pub fn create_ibc_timeout(nanos: u64, height: Option<Height>) -> IbcTimeout {
     match (nanos, height) {
         (0, None) => unimplemented!(),
-        (0, Some(height)) => {
-            IbcTimeout::with_block(IbcTimeoutBlock {
+        (0, Some(height)) => IbcTimeout::with_block(IbcTimeoutBlock {
+            revision: height.revision_number,
+            height: height.revision_height,
+        }),
+        (seconds, None) => IbcTimeout::with_timestamp(Timestamp::from_nanos(seconds)),
+
+        (seconds, Some(height)) => IbcTimeout::with_both(
+            IbcTimeoutBlock {
                 revision: height.revision_number,
                 height: height.revision_height,
-            })
-        }
-        (seconds, None) => {
-            IbcTimeout::with_timestamp(Timestamp::from_nanos(seconds))
-        }
-
-        (seconds, Some(height)) => {
-            IbcTimeout::with_both(
-                IbcTimeoutBlock {
-                    revision: height.revision_number,
-                    height: height.revision_height,
-                },
-                Timestamp::from_nanos(seconds),
-            )
-        }
+            },
+            Timestamp::from_nanos(seconds),
+        ),
     }
 }
+

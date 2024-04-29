@@ -5,10 +5,10 @@ use anyhow::anyhow;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     from_json, to_json_binary, Addr, Api, BankMsg, Binary, BlockInfo, Coin, CosmosMsg, Empty,
-    GrpcQuery, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, Storage, Uint128,
+    Event, GrpcQuery, IbcAcknowledgement, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg,
+    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage, Uint128,
 };
-use cw_iper_test_macros::{urls_int, IbcPort, Stargate};
+use cw_iper_test_macros::{urls, IbcPort, Stargate};
 use cw_multi_test::{AppResponse, BankSudo, SudoMsg};
 
 use cw_storage_plus::Item;
@@ -33,13 +33,13 @@ use std::str::FromStr;
 #[stargate(name = "ics20", query_urls = Ics20QueryUrls, msgs_urls = Ics20MsgUrls)]
 pub struct Ics20;
 
-#[urls_int]
+#[urls]
 pub enum Ics20MsgUrls {
     #[strum(serialize = "/ibc.applications.transfer.v1.MsgTransfer")]
     MsgTransfer,
 }
 
-#[urls_int]
+#[urls]
 pub enum Ics20QueryUrls {}
 
 impl IbcApplication for Ics20 {
@@ -90,8 +90,6 @@ impl IbcApplication for Ics20 {
         let (packet_denom, is_local) = db.handle_outgoing(&data.denom);
 
         let response = if is_local {
-            
-
             router.execute(
                 sender,
                 CosmosMsg::<Empty>::Bank(BankMsg::Send {
@@ -161,8 +159,16 @@ impl IbcApplication for Ics20 {
             } else {
                 router.sudo(SudoMsg::Bank(BankSudo::Mint {
                     to_address: to.to_string(),
-                    amount: vec![coin],
-                }))
+                    amount: vec![coin.clone()],
+                }))?;
+                Ok(AppResponse {
+                    events: vec![Event::new("ics20_mint")
+                        .add_attribute("sender", data.sender)
+                        .add_attribute("receiver", to.to_string())
+                        .add_attribute("amount", coin.amount)
+                        .add_attribute("denom", coin.denom)],
+                    data: None,
+                })
             }
         };
 
@@ -191,14 +197,41 @@ impl IbcApplication for Ics20 {
             FungibleTokenPacketAck::Err(..) => {
                 let original_packet: FungibleTokenPacketData = from_json(msg.original_packet.data)?;
                 router.sudo(SudoMsg::Bank(BankSudo::Mint {
-                    to_address: original_packet.sender,
+                    to_address: original_packet.sender.clone(),
                     amount: vec![Coin::new(
                         Uint128::from_str(&original_packet.amount)?,
-                        original_packet.denom,
+                        original_packet.denom.clone(),
                     )],
-                }))
+                }))?;
+                Ok(AppResponse {
+                    events: vec![Event::new("revert_ibc_transfer")
+                        .add_attribute("sender", original_packet.sender)
+                        .add_attribute("amount", original_packet.amount)
+                        .add_attribute("denom", original_packet.denom)],
+                    data: None,
+                })
             }
         }
+    }
+
+    /// Just raise Ack with mock acknowledgement
+    fn packet_timeout(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcPacketTimeoutMsg,
+    ) -> AppResult<AppResponse> {
+        let msg = IbcPacketAckMsg::new(
+            IbcAcknowledgement::new(to_json_binary(&FungibleTokenPacketAck::Err(
+                "Timeout".to_string(),
+            ))?),
+            msg.packet,
+            msg.relayer,
+        );
+
+        self.packet_ack(api, block, router, storage, msg)
     }
 
     fn open_channel(
@@ -209,7 +242,6 @@ impl IbcApplication for Ics20 {
         _storage: Rc<RefCell<&mut dyn Storage>>,
         _msg: IbcChannelOpenMsg,
     ) -> AppResult<AppResponse> {
-        println!("channel_opened");
         Ok(AppResponse::default())
     }
 
@@ -221,7 +253,6 @@ impl IbcApplication for Ics20 {
         _storage: Rc<RefCell<&mut dyn Storage>>,
         _msg: IbcChannelConnectMsg,
     ) -> AppResult<AppResponse> {
-        println!("channel_connect");
         Ok(AppResponse::default())
     }
 }

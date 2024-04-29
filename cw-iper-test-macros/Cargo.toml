@@ -10,6 +10,7 @@ quote           = "1"
 syn             = { version = "2.0.59", features = ["full", "printing", "extra-traits"] }
 
 [features]
+default         = []
 internal        = []
 
 [lib]

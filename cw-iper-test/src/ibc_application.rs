@@ -1,8 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
-    Addr, Api, Binary, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, Storage,
+    Addr, Api, Binary, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage
 };
 use cw_multi_test::{AppResponse, MockApiBech32};
 
@@ -37,6 +36,15 @@ pub trait IbcApplication: IbcPortInterface {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcPacketAckMsg,
+    ) -> AppResult<AppResponse>;
+
+    fn packet_timeout(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcPacketTimeoutMsg,
     ) -> AppResult<AppResponse>;
 
     fn open_channel(

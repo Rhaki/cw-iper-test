@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
     Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, Storage,
+    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage,
 };
 use cw_multi_test::AppResponse;
 
@@ -70,6 +70,15 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcPacketAckMsg,
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
+
+    fn mid_packet_timeout(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcPacketTimeoutMsg,
     ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 
     fn mid_open_channel(
@@ -195,6 +204,25 @@ where
                 let sub_response = self
                     .get_inner()
                     .packet_ack(api, block, router, storage, msg)?;
+                Ok(response.merge(sub_response))
+            }
+        }
+    }
+
+    fn packet_timeout(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        msg: IbcPacketTimeoutMsg,
+    ) -> AppResult<AppResponse> {
+        match self.mid_packet_timeout(api, block, router, storage.clone(), msg.clone())? {
+            MiddlewareResponse::Stop(response) => Ok(response),
+            MiddlewareResponse::Continue(response) => {
+                let sub_response = self
+                    .get_inner()
+                    .packet_timeout(api, block, router, storage, msg)?;
                 Ok(response.merge(sub_response))
             }
         }
