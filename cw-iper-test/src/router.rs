@@ -21,7 +21,7 @@ macro_rules! router_closure {
                         b64_response: res.into(),
                     }
                 }
-                UseRouter::ExecC {
+                UseRouter::Exec {
                     b64_msg,
                     sender_msg,
                 } => {
@@ -40,6 +40,44 @@ macro_rules! router_closure {
 
                     UseRouterResponse::SudoResponse { response: res }
                 }
+                UseRouter::TryExec {
+                    b64_msg,
+                    sender_msg,
+                } => {
+                    match cw_multi_test::transactional(
+                        *$rc_storage.borrow_mut(),
+                        |write_cache, _| {
+                            Ok($router.execute(
+                                $api,
+                                write_cache,
+                                $block,
+                                sender_msg,
+                                from_json(b64_msg)?,
+                            )?)
+                        },
+                    ) {
+                        Ok(res) => UseRouterResponse::TryExecResponse(
+                            crate::router::TryUseRouterResponse::Ok(res),
+                        ),
+                        Err(err) => UseRouterResponse::TryExecResponse(
+                            crate::router::TryUseRouterResponse::Err(err.to_string()),
+                        ),
+                    }
+                }
+
+                UseRouter::TrySudo { msg } => {
+                    match cw_multi_test::transactional(
+                        *$rc_storage.borrow_mut(),
+                        |write_cache, _| Ok($router.sudo($api, write_cache, $block, msg)?),
+                    ) {
+                        Ok(res) => UseRouterResponse::TrySudoResponse(
+                            crate::router::TryUseRouterResponse::Ok(res),
+                        ),
+                        Err(err) => UseRouterResponse::TrySudoResponse(
+                            crate::router::TryUseRouterResponse::Err(err.to_string()),
+                        ),
+                    }
+                }
             };
 
             Ok(res)
@@ -49,14 +87,24 @@ macro_rules! router_closure {
 
 pub enum UseRouter {
     Query { b64_request: Binary },
-    ExecC { b64_msg: Binary, sender_msg: Addr },
+    Exec { b64_msg: Binary, sender_msg: Addr },
     Sudo { msg: SudoMsg },
+    TryExec { b64_msg: Binary, sender_msg: Addr },
+    TrySudo { msg: SudoMsg },
 }
 
 pub enum UseRouterResponse {
     QueryResponse { b64_response: Binary },
     ExecCResponse { response: AppResponse },
     SudoResponse { response: AppResponse },
+    TryExecResponse(TryUseRouterResponse),
+    TrySudoResponse(TryUseRouterResponse),
+}
+
+#[derive(Debug)]
+pub enum TryUseRouterResponse {
+    Ok(AppResponse),
+    Err(String),
 }
 
 pub struct RouterWrapper<'a> {
@@ -82,7 +130,7 @@ impl<'a> RouterWrapper<'a> {
     }
 
     pub fn execute<T: Serialize>(&self, sender: Addr, comsos_msg: T) -> AppResult<AppResponse> {
-        let res = (self.closure)(UseRouter::ExecC {
+        let res = (self.closure)(UseRouter::Exec {
             sender_msg: sender,
             b64_msg: to_json_binary(&comsos_msg).unwrap(),
         })?;
@@ -99,6 +147,25 @@ impl<'a> RouterWrapper<'a> {
         match res {
             UseRouterResponse::SudoResponse { response } => Ok(response),
             _ => Err(anyhow!("unexpected response")),
+        }
+    }
+
+    /// Try to execute a `CosmosMsg`. If the execution fails, the state is not changed.
+    pub fn try_execute<T: Serialize>(&self, sender: Addr, comsos_msg: T) -> TryUseRouterResponse {
+        match (self.closure)(UseRouter::TryExec {
+            sender_msg: sender,
+            b64_msg: to_json_binary(&comsos_msg).unwrap(),
+        }) {
+            Ok(UseRouterResponse::TryExecResponse(res)) => res,
+            _ => TryUseRouterResponse::Err("unexpected response".to_string()),
+        }
+    }
+
+    /// Try to execute a `SudoMsg`. If the execution fails, the state is not changed.
+    pub fn try_sudo(&self, msg: SudoMsg) -> TryUseRouterResponse {
+        match (self.closure)(UseRouter::TrySudo { msg }) {
+            Ok(UseRouterResponse::TrySudoResponse(res)) => res,
+            _ => TryUseRouterResponse::Err("unexpected response".to_string()),
         }
     }
 }

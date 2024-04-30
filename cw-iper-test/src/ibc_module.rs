@@ -13,7 +13,7 @@ use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     from_json, Addr, Api, Binary, BlockInfo, CustomMsg, CustomQuery, Empty, IbcAcknowledgement,
     IbcChannelConnectMsg, IbcChannelOpenMsg, IbcEndpoint, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcQuery, IbcTimeout, Querier, Storage,
+    IbcPacketReceiveMsg, IbcQuery, IbcTimeout, Querier, Storage,
 };
 use cw_multi_test::{AppResponse, CosmosRouter, Ibc, Module};
 use cw_storage_plus::Item;
@@ -128,7 +128,7 @@ impl IbcModule {
         router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
         block: &BlockInfo,
         application: &str,
-        msg: IbcPacketAckMsg,
+        msg: AckPacket,
     ) -> AppResult<AppResponse>
     where
         ExecC: CustomMsg + DeserializeOwned + 'static,
@@ -152,7 +152,7 @@ impl IbcModule {
         router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
         block: &BlockInfo,
         application: &str,
-        msg: IbcPacketTimeoutMsg,
+        msg: TimeoutPacket,
     ) -> AppResult<AppResponse>
     where
         ExecC: CustomMsg + DeserializeOwned + 'static,
@@ -244,7 +244,7 @@ pub enum IbcPacketType {
     OutgoingPacket(OutgoingPacket),
     OutgoinPacketRaw(OutgoingPacketRaw),
     CloseChannel { channel_id: String },
-    Timeout(OutgoingPacket),
+    Timeout(TimeoutPacket),
 }
 
 impl IbcPacketType {
@@ -258,7 +258,9 @@ impl IbcPacketType {
             IbcPacketType::OutgoinPacketRaw(..) => {
                 bail!("Unexpected error: Channel to deliver can't set for CloseChannel")
             }
-            IbcPacketType::Timeout(packet) => Ok(packet.src.channel_id.clone()),
+            IbcPacketType::Timeout(packet) => {
+                Ok(packet.original_packet.packet.src.channel_id.clone())
+            }
         }
     }
 
@@ -270,7 +272,7 @@ impl IbcPacketType {
             IbcPacketType::OutgoingPacket(packet) => packet.src.channel_id.clone(),
             IbcPacketType::CloseChannel { channel_id } => channel_id.clone(),
             IbcPacketType::OutgoinPacketRaw(packet) => packet.src_channel.clone(),
-            IbcPacketType::Timeout(packet) => packet.dest.channel_id.clone(),
+            IbcPacketType::Timeout(packet) => packet.original_packet.packet.dest.channel_id.clone(),
         }
     }
 }
@@ -306,7 +308,16 @@ impl OutgoingPacketRaw {
 pub struct AckPacket {
     pub ack: Binary,
     pub original_packet: IbcPacketReceiveMsg,
+    pub success: bool,
+    pub relayer: Option<Addr>,
 }
+
+#[cw_serde]
+pub struct TimeoutPacket {
+    pub original_packet: IbcPacketReceiveMsg,
+    pub relayer: Option<Addr>,
+}
+
 impl AckPacket {
     pub fn get_src_channel(&self) -> String {
         self.original_packet.packet.src.channel_id.clone()
@@ -319,6 +330,12 @@ impl AckPacket {
             relayer,
         )
     }
+}
+
+#[cw_serde]
+pub struct AckResponse {
+    pub ack: Option<Binary>,
+    pub success: bool,
 }
 
 impl OutgoingPacket {

@@ -5,8 +5,8 @@ use anyhow::anyhow;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
     from_json, to_json_binary, Addr, Api, BankMsg, Binary, BlockInfo, Coin, CosmosMsg, Empty,
-    Event, GrpcQuery, IbcAcknowledgement, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg,
-    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage, Uint128,
+    Event, GrpcQuery, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketReceiveMsg,
+    Storage, Uint128,
 };
 use cw_iper_test_macros::{urls, IbcPort, Stargate};
 use cw_multi_test::{AppResponse, BankSudo, SudoMsg};
@@ -20,7 +20,9 @@ use sha2::{Digest, Sha256};
 use crate::ibc::create_ibc_timeout;
 use crate::ibc_app::InfallibleResult;
 use crate::ibc_application::{IbcApplication, PacketReceiveFailing, PacketReceiveOk};
-use crate::ibc_module::{emit_packet_boxed, IbcPacketType, OutgoingPacket, OutgoingPacketRaw};
+use crate::ibc_module::{
+    emit_packet_boxed, AckPacket, IbcPacketType, OutgoingPacket, OutgoingPacketRaw, TimeoutPacket,
+};
 
 use crate::{
     error::AppResult, ibc::IbcChannelWrapper, router::RouterWrapper, stargate::StargateApplication,
@@ -190,12 +192,13 @@ impl IbcApplication for Ics20 {
         _block: &BlockInfo,
         router: &RouterWrapper,
         _storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketAckMsg,
+        msg: AckPacket,
     ) -> AppResult<AppResponse> {
-        match from_json::<FungibleTokenPacketAck>(msg.acknowledgement.data)? {
+        match from_json::<FungibleTokenPacketAck>(msg.ack)? {
             FungibleTokenPacketAck::Ok => Ok(AppResponse::default()),
             FungibleTokenPacketAck::Err(..) => {
-                let original_packet: FungibleTokenPacketData = from_json(msg.original_packet.data)?;
+                let original_packet: FungibleTokenPacketData =
+                    from_json(msg.original_packet.packet.data)?;
                 router.sudo(SudoMsg::Bank(BankSudo::Mint {
                     to_address: original_packet.sender.clone(),
                     amount: vec![Coin::new(
@@ -221,15 +224,14 @@ impl IbcApplication for Ics20 {
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketTimeoutMsg,
+        msg: TimeoutPacket,
     ) -> AppResult<AppResponse> {
-        let msg = IbcPacketAckMsg::new(
-            IbcAcknowledgement::new(to_json_binary(&FungibleTokenPacketAck::Err(
-                "Timeout".to_string(),
-            ))?),
-            msg.packet,
-            msg.relayer,
-        );
+        let msg = AckPacket {
+            ack: to_json_binary(&FungibleTokenPacketAck::Err("Timeout".to_string()))?,
+            original_packet: msg.original_packet,
+            success: false,
+            relayer: msg.relayer,
+        };
 
         self.packet_ack(api, block, router, storage, msg)
     }
@@ -420,4 +422,17 @@ fn test_path() {
     let denom = Ics20Helper::compute_ibc_denom_from_trace(&format!("{}/{}",path, base_denom));
 
     println!("{}", denom);
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MemoField<T: Serialize> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wasm: Option<WasmField<T>>,
+    pub ibc_callback: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WasmField<T: Serialize> {
+    pub contract: String,
+    pub msg: T,
 }

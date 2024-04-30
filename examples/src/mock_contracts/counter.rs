@@ -1,10 +1,12 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    entry_point, Binary, Deps, DepsMut, Env, Ibc3ChannelOpenResponse, IbcBasicResponse,
-    IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, MessageInfo, Never, Reply,
-    Response, StdError, StdResult,
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, Ibc3ChannelOpenResponse,
+    IbcBasicResponse, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg,
+    IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, MessageInfo,
+    Never, Reply, Response, StdError, StdResult,
 };
+use cw_iper_test::ibc_applications::IBCLifecycleComplete;
+use cw_storage_plus::Item;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,21 +25,35 @@ pub enum ExecuteMsg {
 }
 
 #[cw_serde]
-pub enum QueryMsg {}
+pub enum CounterQueryMsg {
+    Config,
+}
 
 #[cw_serde]
-pub enum SudoMsg {}
+pub enum SudoMsg {
+    #[serde(rename = "ibc_lifecycle_complete")]
+    IBCLifecycleComplete(IBCLifecycleComplete),
+}
 
 #[cw_serde]
 pub struct MigrateMsg {}
 
+#[derive(Default)]
+#[cw_serde]
+pub struct CounterConfig {
+    pub counter_ibc_callback: u64,
+}
+
+pub const COUNTER_CONFIG: Item<CounterConfig> = Item::new("counter_config");
+
 #[entry_point]
 pub fn instantiate(
-    _deps: DepsMut,
+    deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
     _msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
+    COUNTER_CONFIG.save(deps.storage, &CounterConfig::default())?;
     Ok(Response::new().add_attribute("action", "init"))
 }
 
@@ -64,8 +80,10 @@ pub fn execute(
 }
 
 #[entry_point]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    unimplemented!();
+pub fn query(deps: Deps, _env: Env, msg: CounterQueryMsg) -> StdResult<Binary> {
+    match msg {
+        CounterQueryMsg::Config => to_json_binary(&COUNTER_CONFIG.load(deps.storage)?),
+    }
 }
 
 #[entry_point]
@@ -74,8 +92,27 @@ pub fn _reply(_deps: DepsMut, _env: Env, _reply: Reply) -> Result<Response, Cont
 }
 
 #[entry_point]
-pub fn _sudo(_deps: DepsMut, _env: Env, _msg: SudoMsg) -> Result<Response, ContractError> {
-    unimplemented!();
+pub fn sudo(deps: DepsMut, _env: Env, msg: SudoMsg) -> Result<Response, ContractError> {
+    match msg {
+        SudoMsg::IBCLifecycleComplete(ibc_callback) => {
+            COUNTER_CONFIG.update(deps.storage, |mut val| -> StdResult<_> {
+                val.counter_ibc_callback += 1;
+                Ok(val)
+            })?;
+            // Only for testing purposes, if ack just return default response.
+            // On timeout, raise an error.
+            // This should rever the state of the contract but not the whole transaction,
+            // Allowing to the ics20 module to revert the ics20 transfer.
+            match ibc_callback {
+                IBCLifecycleComplete::IBCAck { .. } => {
+                    Ok(Response::new().add_attribute("action", "ack"))
+                }
+                IBCLifecycleComplete::IBCTimeout { .. } => Err(ContractError::Std(
+                    StdError::generic_err("IBCTimeout detected on sudo"),
+                )),
+            }
+        }
+    }
 }
 
 #[entry_point]

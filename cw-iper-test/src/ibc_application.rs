@@ -1,12 +1,17 @@
 use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
-    Addr, Api, Binary, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage
+    Addr, Api, Binary, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg,
+    IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::{AppResponse, MockApiBech32};
 
 use crate::{
-    error::AppResult, ibc::IbcChannelWrapper, ibc_app::InfallibleResult, router::RouterWrapper,
+    error::AppResult,
+    ibc::IbcChannelWrapper,
+    ibc_app::InfallibleResult,
+    ibc_module::{AckPacket, TimeoutPacket},
+    router::RouterWrapper,
 };
 pub trait IbcApplication: IbcPortInterface {
     fn handle_outgoing_packet(
@@ -35,7 +40,7 @@ pub trait IbcApplication: IbcPortInterface {
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketAckMsg,
+        msg: AckPacket,
     ) -> AppResult<AppResponse>;
 
     fn packet_timeout(
@@ -44,7 +49,7 @@ pub trait IbcApplication: IbcPortInterface {
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketTimeoutMsg,
+        msg: TimeoutPacket,
     ) -> AppResult<AppResponse>;
 
     fn open_channel(

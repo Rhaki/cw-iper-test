@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
-    Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketAckMsg,
-    IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage,
+    Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketReceiveMsg,
+    Storage,
 };
 use cw_multi_test::AppResponse;
 
@@ -11,6 +11,7 @@ use crate::{
     ibc::IbcChannelWrapper,
     ibc_app::InfallibleResult,
     ibc_application::{IbcApplication, IbcPortInterface, PacketReceiveFailing, PacketReceiveOk},
+    ibc_module::{AckPacket, TimeoutPacket},
     response::AppResponseExt,
     router::RouterWrapper,
     stargate::{StargateApplication, StargateName, StargateUrls},
@@ -69,7 +70,7 @@ pub trait Middleware {
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketAckMsg,
+        msg: AckPacket,
     ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 
     fn mid_packet_timeout(
@@ -78,7 +79,7 @@ pub trait Middleware {
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketTimeoutMsg,
+        msg: TimeoutPacket,
     ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
 
     fn mid_open_channel(
@@ -196,7 +197,7 @@ where
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketAckMsg,
+        msg: AckPacket,
     ) -> AppResult<AppResponse> {
         match self.mid_packet_ack(api, block, router, storage.clone(), msg.clone())? {
             MiddlewareResponse::Stop(response) => Ok(response),
@@ -215,7 +216,7 @@ where
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: IbcPacketTimeoutMsg,
+        msg: TimeoutPacket,
     ) -> AppResult<AppResponse> {
         match self.mid_packet_timeout(api, block, router, storage.clone(), msg.clone())? {
             MiddlewareResponse::Stop(response) => Ok(response),

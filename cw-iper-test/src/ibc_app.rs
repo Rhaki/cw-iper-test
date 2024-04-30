@@ -2,12 +2,10 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use anyhow::{anyhow, bail};
 use cosmwasm_std::{
-    Addr, Api, Binary, CustomMsg, CustomQuery, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg,
-    IbcPacket, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage,
+    testing::MockStorage, Addr, Api, Binary, CustomMsg, CustomQuery, Empty, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcPacket, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage
 };
 use cw_multi_test::{
-    transactional, App, AppResponse, Bank, Distribution, Gov, Module, Staking, Stargate,
-    StorageTransaction, Wasm,
+    transactional, App, AppResponse, Bank, BankKeeper, Distribution, DistributionKeeper, FailingModule, Gov, GovFailingModule, MockApiBech32, Module, StakeKeeper, Staking, Stargate, StorageTransaction, Wasm, WasmKeeper
 };
 use serde::de::DeserializeOwned;
 
@@ -18,12 +16,25 @@ use crate::{
         Channels, IbcChannelCreator, IbcChannelExt, IbcChannelStatus, IbcChannelWrapper, IbcPort,
     },
     ibc_module::{
-        emit_packet, AckPacket, IbcModule, IbcPacketType, OutgoingPacket, PENDING_PACKETS,
+        emit_packet, AckPacket, AckResponse, IbcModule, IbcPacketType, OutgoingPacket,
+        TimeoutPacket, PENDING_PACKETS,
     },
-    response::IntoResponse,
+    response::IntoResponse, stargate::StargateModule,
 };
 
 pub type SharedChannels = Rc<RefCell<Channels>>;
+pub type BaseIbcApp = IbcApp<
+    BankKeeper,
+    MockApiBech32,
+    MockStorage,
+    FailingModule<Empty, Empty, Empty>,
+    WasmKeeper<Empty, Empty>,
+    StakeKeeper,
+    DistributionKeeper,
+    IbcModule,
+    GovFailingModule,
+    StargateModule,
+>;
 
 pub struct IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
 where
@@ -211,14 +222,6 @@ where
 
         *channel.sequence.borrow_mut() += 1;
 
-        if let Err(err) = self.check_timeout(&packet) {
-            emit_packet(
-                IbcPacketType::Timeout(packet.clone()),
-                self.app.storage_mut(),
-            )?;
-            return Ok(MayResponse::Err(err.to_string()));
-        }
-
         let msg = IbcPacketReceiveMsg::new(
             IbcPacket::new(
                 packet.data.clone(),
@@ -229,6 +232,17 @@ where
             ),
             self.relayer.clone(),
         );
+
+        if let Err(err) = self.check_timeout(&packet) {
+            emit_packet(
+                IbcPacketType::Timeout(TimeoutPacket {
+                    original_packet: msg,
+                    relayer: None,
+                }),
+                self.app.storage_mut(),
+            )?;
+            return Ok(MayResponse::Err(err.to_string()));
+        }
 
         match &channel.local.port {
             IbcPort::Contract(contract) => {
@@ -253,6 +267,9 @@ where
                         IbcPacketType::AckPacket(AckPacket {
                             ack,
                             original_packet: msg,
+                            // Mock as true for now. This field should not used on contract trigger on src chain
+                            success: true,
+                            relayer: None,
                         }),
                         self.app.storage_mut(),
                     )?;
@@ -263,25 +280,40 @@ where
             IbcPort::Module(name) => {
                 let (api, store, block, router) = self.app.use_parts();
 
-                let (ack, result) = match infallible_transactional(&mut *store, |write_cache, _| {
-                    router.ibc.packet_receive(
-                        &*api,
-                        write_cache,
-                        router,
-                        &*block,
-                        name,
-                        msg.clone(),
-                    )
-                }) {
-                    InfallibleResult::Ok(data) => (data.ack, MayResponse::Ok(data.response)),
-                    InfallibleResult::Err(data) => (data.ack, MayResponse::Err(data.error)),
-                };
+                let (ack_response, result) =
+                    match infallible_transactional(&mut *store, |write_cache, _| {
+                        router.ibc.packet_receive(
+                            &*api,
+                            write_cache,
+                            router,
+                            &*block,
+                            name,
+                            msg.clone(),
+                        )
+                    }) {
+                        InfallibleResult::Ok(data) => (
+                            AckResponse {
+                                ack: data.ack,
+                                success: true,
+                            },
+                            MayResponse::Ok(data.response),
+                        ),
+                        InfallibleResult::Err(data) => (
+                            AckResponse {
+                                ack: data.ack,
+                                success: false,
+                            },
+                            MayResponse::Err(data.error),
+                        ),
+                    };
 
-                if let Some(ack) = ack {
+                if let Some(ack) = ack_response.ack {
                     emit_packet(
                         IbcPacketType::AckPacket(AckPacket {
                             ack,
                             original_packet: msg,
+                            success: ack_response.success,
+                            relayer: None,
                         }),
                         self.app.storage_mut(),
                     )?;
@@ -292,14 +324,12 @@ where
         }
     }
 
-    pub fn packet_ack(&mut self, packet: AckPacket) -> AppResult<AppResponse> {
+    pub fn packet_ack(&mut self, mut packet: AckPacket) -> AppResult<AppResponse> {
         let channel = packet.get_src_channel();
 
         let channels = self.channels.borrow();
 
         let channel = channels.get(channel)?;
-
-        let msg = packet.into_msg(self.relayer.clone());
 
         match &channel.local.port {
             IbcPort::Contract(contract) => {
@@ -311,39 +341,30 @@ where
 
                 self.app.use_contract(contract, |deps, env| {
                     ibc_details
-                        .ibc_packet_ack(deps, env, msg.clone())
+                        .ibc_packet_ack(deps, env, packet.into_msg(self.relayer.clone()))
                         .into_app_response()
                 })
             }
             IbcPort::Module(name) => {
                 let (api, store, block, router) = self.app.use_parts();
 
+                packet.relayer = Some(self.relayer.clone());
+
                 transactional(&mut *store, |write_cache, _| {
                     router
                         .ibc
-                        .packet_ack(&*api, write_cache, router, &*block, name, msg.clone())
+                        .packet_ack(&*api, write_cache, router, &*block, name, packet.clone())
                 })
             }
         }
     }
 
-    pub fn packet_timeout(&mut self, packet: OutgoingPacket) -> AppResult<AppResponse> {
-        let channel = packet.get_src_channel();
+    pub fn packet_timeout(&mut self, packet: TimeoutPacket) -> AppResult<AppResponse> {
+        let channel = packet.original_packet.packet.src.channel_id.clone();
 
         let channels = self.channels.borrow();
 
         let channel = channels.get(channel)?;
-
-        let msg = IbcPacketTimeoutMsg::new(
-            IbcPacket::new(
-                packet.data.clone(),
-                channel.local.as_endpoint()?,
-                channel.remote.as_endpoint()?,
-                *channel.sequence.borrow(),
-                packet.timeout.clone(),
-            ),
-            self.relayer.clone(),
-        );
 
         match &channel.local.port {
             IbcPort::Contract(contract) => {
@@ -352,6 +373,17 @@ where
                     .code_ids
                     .get(&code_id)
                     .ok_or(anyhow!("Code ID not found"))?;
+
+                let msg = IbcPacketTimeoutMsg::new(
+                    IbcPacket::new(
+                        packet.original_packet.packet.data.clone(),
+                        channel.local.as_endpoint()?,
+                        channel.remote.as_endpoint()?,
+                        *channel.sequence.borrow(),
+                        packet.original_packet.packet.timeout.clone(),
+                    ),
+                    self.relayer.clone(),
+                );
 
                 self.app.use_contract(contract, |deps, env| {
                     ibc_details
@@ -365,10 +397,9 @@ where
                 transactional(&mut *store, |write_cache, _| {
                     router
                         .ibc
-                        .packet_timeout(&*api, write_cache, router, &*block, name, msg.clone())
+                        .packet_timeout(&*api, write_cache, router, &*block, name, packet)
                 })
-
-            },
+            }
         }
     }
 
