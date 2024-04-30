@@ -3,7 +3,12 @@ use cosmwasm_std::{
 };
 use cw_multi_test::AppResponse;
 
-use crate::{error::AppResult, ibc_module::IbcPacketType};
+use crate::{
+    error::AppResult,
+    ibc_app::InfallibleResult,
+    ibc_application::{PacketReceiveFailing, PacketReceiveOk},
+    ibc_module::IbcPacketType,
+};
 
 #[derive(Debug, Clone)]
 pub struct RelayedResponse {
@@ -58,6 +63,10 @@ impl<T> IntoResponse<T> for AppResult<IbcReceiveResponse<T>> {
 
 pub trait AppResponseExt {
     fn merge(self, with: AppResponse) -> AppResponse;
+    fn try_merge(
+        self,
+        with: InfallibleResult<PacketReceiveOk, PacketReceiveFailing>,
+    ) -> AppResponse;
 }
 
 impl AppResponseExt for AppResponse {
@@ -73,5 +82,15 @@ impl AppResponseExt for AppResponse {
         }
 
         base
+    }
+
+    fn try_merge(
+        self,
+        with: InfallibleResult<PacketReceiveOk, PacketReceiveFailing>,
+    ) -> AppResponse {
+        match with {
+            InfallibleResult::Ok(ok) => ok.response.merge(self),
+            InfallibleResult::Err(..) => self,
+        }
     }
 }

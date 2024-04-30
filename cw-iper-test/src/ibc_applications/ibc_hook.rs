@@ -9,8 +9,8 @@ use std::str::FromStr;
 use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
-    from_json, to_json_binary, Addr, Api, BlockInfo, CosmosMsg, IbcChannelConnectMsg,
-    IbcChannelOpenMsg, IbcMsg, IbcPacket, IbcPacketReceiveMsg, Storage, WasmMsg,
+    from_json, to_json_binary, Addr, Api, BlockInfo, CosmosMsg, IbcPacket, IbcPacketReceiveMsg,
+    Storage, WasmMsg,
 };
 use cw_multi_test::{AppResponse, SudoMsg, WasmSudo};
 use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
@@ -20,13 +20,10 @@ use sha2::{Digest, Sha256};
 use crate::ibc_app::InfallibleResult;
 use crate::ibc_application::PacketReceiveFailing;
 use crate::ibc_module::{AckPacket, TimeoutPacket};
-use crate::middleware::{
-    IbcAndStargate, Middleware, MiddlewareResponse, MiddlewareUniqueResponse, PacketToNext,
-};
-use crate::response::AppResponseExt;
+use crate::middleware::{IbcAndStargate, MidRecFailing, MidRecOk, Middleware, MiddlewareResponse};
 use crate::{
-    chain_helper::ChainHelper, error::AppResult, ibc::IbcChannelWrapper,
-    ibc_application::PacketReceiveOk, ibc_applications::ics20::ICS20DB, router::RouterWrapper,
+    chain_helper::ChainHelper, error::AppResult, ibc_application::PacketReceiveOk,
+    ibc_applications::ics20::ICS20DB, router::RouterWrapper,
 };
 
 use super::ics20::FungibleTokenPacketAck;
@@ -50,7 +47,7 @@ impl IbcHook {
         router: &RouterWrapper,
         _storage: Rc<RefCell<&mut dyn Storage>>,
         packet: AckOrTimeout,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+    ) -> AppResult<AppResponse> {
         let data: FungibleTokenPacketData = from_json(&packet.get_original_packet().data)?;
 
         if let Ok(wasm_field) = serde_json::from_str::<MemoField<Value>>(&data.memo) {
@@ -77,26 +74,13 @@ impl IbcHook {
             }
         }
 
-        Ok(MiddlewareResponse::Continue(AppResponse::default()))
+        Ok(AppResponse::default())
     }
 }
 
 impl Middleware for IbcHook {
     fn get_inner(&self) -> &dyn IbcAndStargate {
         &*self.inner
-    }
-
-    fn mid_handle_outgoing_packet(
-        &self,
-        _api: &dyn Api,
-        _block: &BlockInfo,
-        _sender: Addr,
-        _router: &RouterWrapper,
-        _storage: Rc<RefCell<&mut dyn Storage>>,
-        _msg: IbcMsg,
-        _channel: IbcChannelWrapper,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
-        Ok(MiddlewareResponse::Continue(AppResponse::default()))
     }
 
     fn mid_packet_receive_before(
@@ -106,9 +90,11 @@ impl Middleware for IbcHook {
         _router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         packet: IbcPacketReceiveMsg,
-    ) -> InfallibleResult<MiddlewareResponse<PacketReceiveOk, PacketToNext>, PacketReceiveFailing>
-    {
-        let clos = || -> AppResult<MiddlewareResponse<PacketReceiveOk, PacketToNext>> {
+    ) -> InfallibleResult<
+        MiddlewareResponse<PacketReceiveOk, IbcPacketReceiveMsg>,
+        PacketReceiveFailing,
+    > {
+        let clos = || -> AppResult<MiddlewareResponse<PacketReceiveOk, IbcPacketReceiveMsg>> {
             let mut data: FungibleTokenPacketData = from_json(&packet.packet.data)?;
 
             if data.memo != *"" {
@@ -134,19 +120,15 @@ impl Middleware for IbcHook {
                     packet.relayer.clone(),
                 );
 
-                Ok(MiddlewareResponse::Continue(PacketToNext {
-                    packet: forwarded_packet,
-                }))
+                Ok(MiddlewareResponse::Continue(forwarded_packet))
             } else {
-                Ok(MiddlewareResponse::Continue(PacketToNext {
-                    packet: packet.clone(),
-                }))
+                Ok(MiddlewareResponse::Continue(packet.clone()))
             }
         };
 
         match clos() {
             Ok(response) => InfallibleResult::Ok(response),
-            Err(..) => InfallibleResult::Ok(MiddlewareResponse::Continue(PacketToNext { packet })),
+            Err(..) => InfallibleResult::Ok(MiddlewareResponse::Continue(packet)),
         }
     }
 
@@ -158,10 +140,10 @@ impl Middleware for IbcHook {
         storage: Rc<RefCell<&mut dyn Storage>>,
         original_packet: IbcPacketReceiveMsg,
         forwarded_packet: IbcPacketReceiveMsg,
-        forwarded_response: PacketReceiveOk,
-    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing> {
-        let clos = || -> AppResult<InfallibleResult<PacketReceiveOk, PacketReceiveFailing>> {
-            if original_packet != forwarded_packet {
+        forwarded_response: InfallibleResult<PacketReceiveOk, PacketReceiveFailing>,
+    ) -> InfallibleResult<MidRecOk, MidRecFailing> {
+        let clos = || -> AppResult<InfallibleResult<MidRecOk, MidRecFailing>> {
+            if original_packet != forwarded_packet && forwarded_response.is_ok() {
                 let data: FungibleTokenPacketData = from_json(&original_packet.packet.data)?;
 
                 let wasm_field = serde_json::from_str::<MemoField<Value>>(&data.memo)?;
@@ -185,71 +167,59 @@ impl Middleware for IbcHook {
                             funds: vec![Coin::new(Uint128::from_str(&data.amount)?.u128(), denom)],
                         }),
                     ) {
-                        Ok(response) => Ok(InfallibleResult::Ok(PacketReceiveOk {
-                            response: forwarded_response.response.clone().merge(response),
-                            ack: forwarded_response.ack.clone(),
-                        })),
-                        Err(err) => Ok(InfallibleResult::Err(PacketReceiveFailing {
-                            error: err.to_string(),
-                            ack: Some(
-                                to_json_binary(&FungibleTokenPacketAck::Err(err.to_string()))
-                                    .unwrap(),
-                            ),
-                        })),
+                        Ok(response) => Ok(InfallibleResult::Ok(MidRecOk::use_children(response))),
+                        Err(err) => Ok(InfallibleResult::Err(MidRecFailing::new(
+                            err.to_string(),
+                            to_json_binary(&FungibleTokenPacketAck::Err(err.to_string()))?,
+                        ))),
                     }
                 } else {
                     bail!("No wasm field found in memo")
                 }
             } else {
-                bail!("Packet are equals")
+                bail!("Skip")
             }
         };
 
-        clos().unwrap_or(InfallibleResult::Ok(forwarded_response))
+        clos().unwrap_or(InfallibleResult::Ok(MidRecOk::default()))
     }
 
-    fn mid_packet_ack(
+    fn mid_packet_ack_after(
         &self,
         api: &dyn Api,
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: AckPacket,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
-        self.try_handle_callback(api, block, router, storage, AckOrTimeout::Ack(msg))
+        original_packet: AckPacket,
+        _forwarded_packet: AckPacket,
+        _returning_reponse: AppResponse,
+    ) -> AppResult<AppResponse> {
+        self.try_handle_callback(
+            api,
+            block,
+            router,
+            storage,
+            AckOrTimeout::Ack(original_packet),
+        )
     }
 
-    fn mid_open_channel(
-        &self,
-        _api: &dyn Api,
-        _block: &BlockInfo,
-        _router: &RouterWrapper,
-        _storage: Rc<RefCell<&mut dyn Storage>>,
-        _msg: IbcChannelOpenMsg,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
-        Ok(MiddlewareResponse::Continue(AppResponse::default()))
-    }
-
-    fn mid_channel_connect(
-        &self,
-        _api: &dyn Api,
-        _block: &BlockInfo,
-        _router: &RouterWrapper,
-        _storage: Rc<RefCell<&mut dyn Storage>>,
-        _msg: IbcChannelConnectMsg,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
-        Ok(MiddlewareResponse::Continue(AppResponse::default()))
-    }
-
-    fn mid_packet_timeout(
+    fn mid_packet_timeout_after(
         &self,
         api: &dyn Api,
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: TimeoutPacket,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
-        self.try_handle_callback(api, block, router, storage, AckOrTimeout::Timeout(msg))
+        original_packet: TimeoutPacket,
+        _forwarded_packet: TimeoutPacket,
+        _returning_reponse: AppResponse,
+    ) -> AppResult<AppResponse> {
+        self.try_handle_callback(
+            api,
+            block,
+            router,
+            storage,
+            AckOrTimeout::Timeout(original_packet),
+        )
     }
 }
 

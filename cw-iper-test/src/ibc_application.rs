@@ -77,11 +77,13 @@ pub trait IbcPortInterface {
     fn port_name(&self) -> String;
 }
 
+#[derive(Debug, Clone)]
 pub struct PacketReceiveOk {
     pub response: AppResponse,
     pub ack: Option<Binary>,
 }
 
+#[derive(Debug, Clone)]
 pub struct PacketReceiveFailing {
     pub error: String,
     pub ack: Option<Binary>,

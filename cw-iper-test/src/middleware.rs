@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{
-    Addr, Api, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg, IbcPacketReceiveMsg,
-    Storage,
+    Addr, Api, Binary, BlockInfo, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg,
+    IbcPacketReceiveMsg, Storage,
 };
 use cw_multi_test::AppResponse;
 
@@ -33,6 +33,7 @@ pub struct PacketToNext {
 pub trait Middleware {
     fn get_inner(&self) -> &dyn IbcAndStargate;
 
+    #[allow(unused_variables)]
     fn mid_handle_outgoing_packet(
         &self,
         api: &dyn Api,
@@ -42,8 +43,11 @@ pub trait Middleware {
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcMsg,
         channel: IbcChannelWrapper,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
+    }
 
+    #[allow(unused_variables)]
     fn mid_packet_receive_before(
         &self,
         api: &dyn Api,
@@ -51,8 +55,14 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         packet: IbcPacketReceiveMsg,
-    ) -> InfallibleResult<MiddlewareResponse<PacketReceiveOk, PacketToNext>, PacketReceiveFailing>;
+    ) -> InfallibleResult<
+        MiddlewareResponse<PacketReceiveOk, IbcPacketReceiveMsg>,
+        PacketReceiveFailing,
+    > {
+        InfallibleResult::Ok(MiddlewareResponse::Continue(packet))
+    }
 
+    #[allow(unused_variables)]
     fn mid_packet_receive_after(
         &self,
         api: &dyn Api,
@@ -61,27 +71,67 @@ pub trait Middleware {
         storage: Rc<RefCell<&mut dyn Storage>>,
         original_packet: IbcPacketReceiveMsg,
         forwarded_packet: IbcPacketReceiveMsg,
-        forwarded_response: PacketReceiveOk,
-    ) -> InfallibleResult<PacketReceiveOk, PacketReceiveFailing>;
+        returning_reponse: InfallibleResult<PacketReceiveOk, PacketReceiveFailing>,
+    ) -> InfallibleResult<MidRecOk, MidRecFailing> {
+        InfallibleResult::Ok(MidRecOk {
+            response: AppResponse::default(),
+            ack: AckSetting::UseChildren,
+        })
+    }
 
-    fn mid_packet_ack(
+    #[allow(unused_variables)]
+    fn mid_packet_ack_before(
         &self,
         api: &dyn Api,
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: AckPacket,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
+        packet: AckPacket,
+    ) -> AppResult<MiddlewareResponse<AppResponse, AckPacket>> {
+        Ok(MiddlewareResponse::Continue(packet))
+    }
 
-    fn mid_packet_timeout(
+    #[allow(unused_variables)]
+    fn mid_packet_ack_after(
         &self,
         api: &dyn Api,
         block: &BlockInfo,
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
-        msg: TimeoutPacket,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
+        original_packet: AckPacket,
+        forwarded_packet: AckPacket,
+        returning_reponse: AppResponse,
+    ) -> AppResult<AppResponse> {
+        Ok(AppResponse::default())
+    }
 
+    #[allow(unused_variables)]
+    fn mid_packet_timeout_before(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        storage: Rc<RefCell<&mut dyn Storage>>,
+        packet: TimeoutPacket,
+    ) -> AppResult<MiddlewareResponse<AppResponse, TimeoutPacket>> {
+        Ok(MiddlewareResponse::Continue(packet))
+    }
+
+    #[allow(unused_variables)]
+    fn mid_packet_timeout_after(
+        &self,
+        api: &dyn Api,
+        block: &BlockInfo,
+        router: &RouterWrapper,
+        torage: Rc<RefCell<&mut dyn Storage>>,
+        original_packet: TimeoutPacket,
+        forwarded_packet: TimeoutPacket,
+        returning_reponse: AppResponse,
+    ) -> AppResult<AppResponse> {
+        Ok(AppResponse::default())
+    }
+
+    #[allow(unused_variables)]
     fn mid_open_channel(
         &self,
         api: &dyn Api,
@@ -89,8 +139,11 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcChannelOpenMsg,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
+    }
 
+    #[allow(unused_variables)]
     fn mid_channel_connect(
         &self,
         api: &dyn Api,
@@ -98,7 +151,9 @@ pub trait Middleware {
         router: &RouterWrapper,
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: IbcChannelConnectMsg,
-    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>>;
+    ) -> AppResult<MiddlewareUniqueResponse<AppResponse>> {
+        Ok(MiddlewareResponse::Continue(AppResponse::default()))
+    }
 }
 
 impl<T> IbcPortInterface for T
@@ -170,20 +225,26 @@ where
                         block,
                         router,
                         storage.clone(),
-                        next_packet.packet.clone(),
+                        next_packet.clone(),
                     );
 
-                    match sub_response {
-                        InfallibleResult::Ok(sub_response) => self.mid_packet_receive_after(
-                            api,
-                            block,
-                            router,
-                            storage,
-                            original_packet,
-                            next_packet.packet,
-                            sub_response,
-                        ),
-                        InfallibleResult::Err(err) => InfallibleResult::Err(err),
+                    match self.mid_packet_receive_after(
+                        api,
+                        block,
+                        router,
+                        storage,
+                        original_packet,
+                        next_packet,
+                        sub_response.clone(),
+                    ) {
+                        InfallibleResult::Ok(ok) => InfallibleResult::Ok(PacketReceiveOk {
+                            response: ok.response.try_merge(sub_response.clone()),
+                            ack: ok.ack.merge_ack(sub_response),
+                        }),
+                        InfallibleResult::Err(err) => InfallibleResult::Err(PacketReceiveFailing {
+                            error: err.error,
+                            ack: err.ack.merge_ack(sub_response),
+                        }),
                     }
                 }
             },
@@ -199,13 +260,27 @@ where
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: AckPacket,
     ) -> AppResult<AppResponse> {
-        match self.mid_packet_ack(api, block, router, storage.clone(), msg.clone())? {
+        match self.mid_packet_ack_before(api, block, router, storage.clone(), msg.clone())? {
             MiddlewareResponse::Stop(response) => Ok(response),
-            MiddlewareResponse::Continue(response) => {
-                let sub_response = self
-                    .get_inner()
-                    .packet_ack(api, block, router, storage, msg)?;
-                Ok(response.merge(sub_response))
+            MiddlewareResponse::Continue(next_packet) => {
+                let sub_response = self.get_inner().packet_ack(
+                    api,
+                    block,
+                    router,
+                    storage.clone(),
+                    next_packet.clone(),
+                )?;
+
+                let res = self.mid_packet_ack_after(
+                    api,
+                    block,
+                    router,
+                    storage,
+                    msg,
+                    next_packet,
+                    sub_response.clone(),
+                )?;
+                Ok(res.merge(sub_response))
             }
         }
     }
@@ -218,13 +293,27 @@ where
         storage: Rc<RefCell<&mut dyn Storage>>,
         msg: TimeoutPacket,
     ) -> AppResult<AppResponse> {
-        match self.mid_packet_timeout(api, block, router, storage.clone(), msg.clone())? {
+        match self.mid_packet_timeout_before(api, block, router, storage.clone(), msg.clone())? {
             MiddlewareResponse::Stop(response) => Ok(response),
-            MiddlewareResponse::Continue(response) => {
-                let sub_response = self
-                    .get_inner()
-                    .packet_timeout(api, block, router, storage, msg)?;
-                Ok(response.merge(sub_response))
+            MiddlewareResponse::Continue(next_packet) => {
+                let sub_response = self.get_inner().packet_timeout(
+                    api,
+                    block,
+                    router,
+                    storage.clone(),
+                    msg.clone(),
+                )?;
+
+                let res = self.mid_packet_timeout_after(
+                    api,
+                    block,
+                    router,
+                    storage,
+                    msg,
+                    next_packet,
+                    sub_response.clone(),
+                )?;
+                Ok(res.merge(sub_response))
             }
         }
     }
@@ -335,3 +424,64 @@ where
 }
 
 impl<T> IbcAndStargate for T where T: IbcApplication + StargateApplication {}
+
+pub enum AckSetting {
+    Replace(Binary),
+    Remove,
+    UseChildren,
+}
+
+impl AckSetting {
+    pub fn merge_ack(
+        &self,
+        response: InfallibleResult<PacketReceiveOk, PacketReceiveFailing>,
+    ) -> Option<Binary> {
+        let ack = match response {
+            InfallibleResult::Ok(ok) => ok.ack,
+            InfallibleResult::Err(err) => err.ack,
+        };
+
+        match self {
+            AckSetting::Replace(replace) => Some(replace.clone()),
+            AckSetting::Remove => None,
+            AckSetting::UseChildren => ack,
+        }
+    }
+}
+
+pub struct MidRecOk {
+    pub response: AppResponse,
+    pub ack: AckSetting,
+}
+
+impl MidRecOk {
+    pub fn use_children(response: AppResponse) -> Self {
+        Self {
+            response,
+            ack: AckSetting::UseChildren,
+        }
+    }
+}
+
+impl Default for MidRecOk {
+    fn default() -> Self {
+        Self {
+            response: Default::default(),
+            ack: AckSetting::UseChildren,
+        }
+    }
+}
+
+pub struct MidRecFailing {
+    pub error: String,
+    pub ack: AckSetting,
+}
+
+impl MidRecFailing {
+    pub fn new(error: impl Into<String>, ack: Binary) -> Self {
+        Self {
+            error: error.into(),
+            ack: AckSetting::Replace(ack),
+        }
+    }
+}

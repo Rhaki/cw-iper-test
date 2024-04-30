@@ -2,10 +2,14 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use anyhow::{anyhow, bail};
 use cosmwasm_std::{
-    testing::MockStorage, Addr, Api, Binary, CustomMsg, CustomQuery, Empty, IbcChannel, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcPacket, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, Storage
+    testing::MockStorage, Addr, Api, Binary, CustomMsg, CustomQuery, Empty, IbcChannel,
+    IbcChannelConnectMsg, IbcChannelOpenMsg, IbcPacket, IbcPacketReceiveMsg, IbcPacketTimeoutMsg,
+    Storage,
 };
 use cw_multi_test::{
-    transactional, App, AppResponse, Bank, BankKeeper, Distribution, DistributionKeeper, FailingModule, Gov, GovFailingModule, MockApiBech32, Module, StakeKeeper, Staking, Stargate, StorageTransaction, Wasm, WasmKeeper
+    transactional, App, AppResponse, Bank, BankKeeper, Distribution, DistributionKeeper,
+    FailingModule, Gov, GovFailingModule, MockApiBech32, Module, StakeKeeper, Staking, Stargate,
+    StorageTransaction, Wasm, WasmKeeper,
 };
 use serde::de::DeserializeOwned;
 
@@ -19,7 +23,8 @@ use crate::{
         emit_packet, AckPacket, AckResponse, IbcModule, IbcPacketType, OutgoingPacket,
         TimeoutPacket, PENDING_PACKETS,
     },
-    response::IntoResponse, stargate::StargateModule,
+    response::IntoResponse,
+    stargate::StargateModule,
 };
 
 pub type SharedChannels = Rc<RefCell<Channels>>;
@@ -535,12 +540,23 @@ where
     res
 }
 
+#[derive(Debug, Clone)]
 pub enum InfallibleResult<T, E> {
     Ok(T),
     Err(E),
 }
 
-#[derive(Debug)]
+impl<T, E> InfallibleResult<T, E> {
+    pub fn is_err(&self) -> bool {
+        matches!(self, InfallibleResult::Err(_))
+    }
+
+    pub fn is_ok(&self) -> bool {
+        matches!(self, InfallibleResult::Ok(_))
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum MayResponse {
     Ok(AppResponse),
     Err(String),
