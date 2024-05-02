@@ -19,13 +19,13 @@ use prost::Message;
 
 #[test]
 fn base_ics20_transfer() {
-    let terra = AppBuilder::new()
-        .with_api(MockApiBech32::new("terra"))
+    let neutron = AppBuilder::new()
+        .with_api(MockApiBech32::new("neutron"))
         .with_ibc(IperIbcModule::default())
         .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_iper_app("terra");
+        .into_iper_app("neutron");
 
     let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
@@ -33,7 +33,7 @@ fn base_ics20_transfer() {
         .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
-        .add_app(terra.clone())
+        .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
     eco.open_ibc_channel(
@@ -42,7 +42,7 @@ fn base_ics20_transfer() {
             IbcOrder::Unordered,
             "version",
             "connection_id",
-            "terra",
+            "neutron",
         ),
         IbcChannelCreator::new(
             IbcPort::from_application(Ics20),
@@ -54,10 +54,10 @@ fn base_ics20_transfer() {
     )
     .unwrap();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -67,13 +67,13 @@ fn base_ics20_transfer() {
         memo: None,
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -82,31 +82,31 @@ fn base_ics20_transfer() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron.borrow_mut().app.execute(sender.clone(), msg).unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, Uint128::zero());
 
-    let supply = terra
+    let supply = neutron
         .borrow()
         .app
         .wrap()
         .query::<SupplyResponse>(&QueryRequest::Bank(BankQuery::Supply {
-            denom: "uluna".to_string(),
+            denom: "untrn".to_string(),
         }))
         .unwrap();
 
     assert_eq!(supply.amount.amount, amount.amount);
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -123,7 +123,7 @@ fn base_ics20_transfer() {
         channel_id: "channel-0".to_string(),
         to_address: sender.to_string(),
         amount: Coin::new(amount.amount, &ibc_denom),
-        timeout: IbcTimeout::with_timestamp(terra.borrow().app.block_info().time.plus_seconds(1)),
+        timeout: IbcTimeout::with_timestamp(neutron.borrow().app.block_info().time.plus_seconds(1)),
         memo: None,
     });
 
@@ -135,11 +135,11 @@ fn base_ics20_transfer() {
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, amount.amount);
@@ -167,13 +167,13 @@ fn base_ics20_transfer() {
 
 #[test]
 fn stargate_ics20_transfer() {
-    let terra = AppBuilder::new()
-        .with_api(MockApiBech32::new("terra"))
+    let neutron = AppBuilder::new()
+        .with_api(MockApiBech32::new("neutron"))
         .with_ibc(IperIbcModule::default())
         .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_iper_app("terra");
+        .into_iper_app("neutron");
 
     let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
@@ -181,7 +181,7 @@ fn stargate_ics20_transfer() {
         .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
-        .add_app(terra.clone())
+        .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
     eco.open_ibc_channel(
@@ -190,7 +190,7 @@ fn stargate_ics20_transfer() {
             IbcOrder::Unordered,
             "version",
             "connection_id",
-            "terra",
+            "neutron",
         ),
         IbcChannelCreator::new(
             IbcPort::from_application(Ics20),
@@ -202,10 +202,10 @@ fn stargate_ics20_transfer() {
     )
     .unwrap();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = MsgTransfer {
         source_port: "transfer".to_string(),
@@ -227,13 +227,13 @@ fn stargate_ics20_transfer() {
         value: msg.encode_to_vec().into(),
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -242,20 +242,20 @@ fn stargate_ics20_transfer() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron.borrow_mut().app.execute(sender.clone(), msg).unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, Uint128::zero());
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -269,13 +269,13 @@ fn stargate_ics20_transfer() {
 
 #[test]
 fn failing_ics20_transfer() {
-    let terra = AppBuilder::new()
-        .with_api(MockApiBech32::new("terra"))
+    let neutron = AppBuilder::new()
+        .with_api(MockApiBech32::new("neutron"))
         .with_ibc(IperIbcModule::default())
         .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_iper_app("terra");
+        .into_iper_app("neutron");
 
     let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
@@ -283,7 +283,7 @@ fn failing_ics20_transfer() {
         .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
-        .add_app(terra.clone())
+        .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
     eco.open_ibc_channel(
@@ -292,7 +292,7 @@ fn failing_ics20_transfer() {
             IbcOrder::Unordered,
             "version",
             "connection_id",
-            "terra",
+            "neutron",
         ),
         IbcChannelCreator::new(
             IbcPort::from_application(Ics20),
@@ -304,10 +304,10 @@ fn failing_ics20_transfer() {
     )
     .unwrap();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -319,13 +319,13 @@ fn failing_ics20_transfer() {
         memo: None,
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -334,20 +334,20 @@ fn failing_ics20_transfer() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron.borrow_mut().app.execute(sender.clone(), msg).unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, amount.amount);
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -361,13 +361,13 @@ fn failing_ics20_transfer() {
 
 #[test]
 fn timeout_ics20_transfer() {
-    let terra = AppBuilder::new()
-        .with_api(MockApiBech32::new("terra"))
+    let neutron = AppBuilder::new()
+        .with_api(MockApiBech32::new("neutron"))
         .with_ibc(IperIbcModule::default())
         .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_iper_app("terra");
+        .into_iper_app("neutron");
 
     let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
@@ -375,7 +375,7 @@ fn timeout_ics20_transfer() {
         .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
-        .add_app(terra.clone())
+        .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
     eco.open_ibc_channel(
@@ -384,7 +384,7 @@ fn timeout_ics20_transfer() {
             IbcOrder::Unordered,
             "version",
             "connection_id",
-            "terra",
+            "neutron",
         ),
         IbcChannelCreator::new(
             IbcPort::from_application(Ics20),
@@ -396,10 +396,10 @@ fn timeout_ics20_transfer() {
     )
     .unwrap();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = "invalid_address".to_string();
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -409,13 +409,13 @@ fn timeout_ics20_transfer() {
         memo: None,
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -424,20 +424,20 @@ fn timeout_ics20_transfer() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron.borrow_mut().app.execute(sender.clone(), msg).unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, amount.amount);
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()

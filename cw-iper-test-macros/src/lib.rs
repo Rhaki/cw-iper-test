@@ -3,6 +3,8 @@ use proc_macro2::TokenTree;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, Expr, Lit, Meta};
 
+/// Implements following traits from `cw_iper_test` crate:
+/// - `IbcPortInterface`
 #[proc_macro_derive(IbcPort, attributes(ibc_port))]
 pub fn derive_ibc_port(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -32,7 +34,7 @@ pub fn derive_ibc_port(input: TokenStream) -> TokenStream {
             /// Ibc port name
             pub const IBC_PORT: &'static str = #f;
         }
-        impl #prepath::ibc_application::IbcPortInterface for #struct_name {
+        impl #prepath::IbcPortInterface for #struct_name {
             fn port_name(&self) -> String {
                 #f.to_string()
             }
@@ -42,6 +44,9 @@ pub fn derive_ibc_port(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Implements following traits from `cw_iper_test` crate:
+/// - `StargateUrls`
+/// - `StargateName`
 #[proc_macro_derive(Stargate, attributes(stargate))]
 pub fn derive_stargate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -84,7 +89,7 @@ pub fn derive_stargate(input: TokenStream) -> TokenStream {
     let prepath = prepath();
 
     let expanded = quote! {
-        impl #prepath::stargate::StargateUrls for #struct_name {
+        impl #prepath::StargateUrls for #struct_name {
 
             fn is_query_type_url(&self, type_url: String) -> bool {
                 <#query as std::str::FromStr>::from_str(&type_url).is_ok()
@@ -102,7 +107,7 @@ pub fn derive_stargate(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl #prepath::stargate::StargateName for #struct_name {
+        impl #prepath::StargateName for #struct_name {
             fn stargate_name(&self) -> String {
                 #name.to_string()
             }

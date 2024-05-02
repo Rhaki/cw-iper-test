@@ -1,15 +1,17 @@
 [package]
 name                = "cw-iper-test"
+description         = "Testing tools for ibc multi-contract interactions"
 version             = { workspace = true }
 authors             = { workspace = true }
 edition             = { workspace = true }
+license             = { workspace = true }
 
 [dependencies]
 anyhow              = { workspace = true }
 bech32              = { workspace = true } 
 cosmwasm-std        = { workspace = true }
 cosmwasm-schema     = { workspace = true }
-cw-iper-test-macros = { workspace = true, features = ["internal"]}
+cw-iper-test-macros = { version = "0.1.0", features = ["internal"]}
 cw-multi-test       = { workspace = true }
 cw-storage-plus     = { workspace = true }
 ibc                 = { workspace = true } 

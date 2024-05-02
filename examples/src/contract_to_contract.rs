@@ -5,23 +5,23 @@ use cw_iper_test::{
     IperIbcModule, IperStargateModule, MultiContract,
 };
 
-use crate::mock_contracts::counter;
+use crate::mock_contracts::counter::{self, CounterConfig, CounterPacketData, CounterQueryMsg};
 
 #[test]
 fn contract_to_contract() {
-    let terra = AppBuilder::new()
-        .with_api(MockApiBech32::new("terra"))
+    let neutron = AppBuilder::new()
+        .with_api(MockApiBech32::new("neutron"))
         .with_ibc(IperIbcModule::default())
         .with_stargate(IperStargateModule::default())
         .build(no_init)
-        .into_iper_app("terra");
+        .into_iper_app("neutron");
 
     let osmosis = IperAppBuilder::new("osmo")
         .build(no_init)
         .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
-        .add_app(terra.clone())
+        .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
     let contract = MultiContract::new(
@@ -36,7 +36,7 @@ fn contract_to_contract() {
         )),
     );
 
-    let code_id_terra = terra.borrow_mut().store_ibc_code(contract);
+    let code_id_neutron = neutron.borrow_mut().store_ibc_code(contract);
 
     let contract = MultiContract::new(
         ContractWrapper::new(counter::execute, counter::instantiate, counter::query).to_contract(),
@@ -52,15 +52,15 @@ fn contract_to_contract() {
 
     let code_id_osmosis = osmosis.borrow_mut().store_ibc_code(contract);
 
-    let terra_owner = terra.borrow().app.api().addr_make("owner");
+    let neutron_owner = neutron.borrow().app.api().addr_make("owner");
     let osmosis_owner = osmosis.borrow().app.api().addr_make("owner");
 
-    let terra_addr = terra
+    let neutron_addr = neutron
         .borrow_mut()
         .app
         .instantiate_contract(
-            code_id_terra,
-            terra_owner.clone(),
+            code_id_neutron,
+            neutron_owner.clone(),
             &counter::InstantiateMsg {},
             &[],
             "label".to_string(),
@@ -83,11 +83,11 @@ fn contract_to_contract() {
 
     eco.open_ibc_channel(
         IbcChannelCreator::new(
-            IbcPort::Contract(terra_addr.clone()),
+            IbcPort::Contract(neutron_addr.clone()),
             IbcOrder::Unordered,
             "version",
             "connection_id",
-            "terra",
+            "neutron",
         ),
         IbcChannelCreator::new(
             IbcPort::Contract(osmosis_addr.clone()),
@@ -101,24 +101,42 @@ fn contract_to_contract() {
 
     let msg = IbcMsg::SendPacket {
         channel_id: "channel-0".to_string(),
-        data: to_json_binary("some_ack").unwrap(),
+        data: to_json_binary(&CounterPacketData::Ok).unwrap(),
         timeout: IbcTimeout::with_timestamp(Timestamp::from_seconds(
             osmosis.borrow().app.block_info().time.seconds() + 1,
         )),
     };
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute_contract(
-            terra_owner,
-            terra_addr,
+            neutron_owner,
+            neutron_addr.clone(),
             &counter::ExecuteMsg::SendPacket(msg),
             &[],
         )
         .unwrap();
 
-    let res = eco.relay_all_packets().unwrap();
+    eco.relay_all_packets().unwrap();
 
-    println!("{:#?}", res);
+    let counter_src_ack_ok = neutron
+        .borrow()
+        .app
+        .wrap()
+        .query_wasm_smart::<CounterConfig>(&neutron_addr, &CounterQueryMsg::Config)
+        .unwrap()
+        .counter_packet_ack_ok;
+
+    assert_eq!(counter_src_ack_ok, 1);
+
+    let counter_receive_dest = osmosis
+        .borrow()
+        .app
+        .wrap()
+        .query_wasm_smart::<CounterConfig>(&osmosis_addr, &CounterQueryMsg::Config)
+        .unwrap()
+        .counter_packet_receive;
+
+    assert_eq!(counter_receive_dest, 1);
 }

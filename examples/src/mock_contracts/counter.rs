@@ -1,6 +1,6 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{
-    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, Ibc3ChannelOpenResponse,
+    entry_point, from_json, to_json_binary, Binary, Deps, DepsMut, Env, Ibc3ChannelOpenResponse,
     IbcBasicResponse, IbcChannelCloseMsg, IbcChannelConnectMsg, IbcChannelOpenMsg, IbcMsg,
     IbcPacketAckMsg, IbcPacketReceiveMsg, IbcPacketTimeoutMsg, IbcReceiveResponse, MessageInfo,
     Never, Reply, Response, StdError, StdResult,
@@ -38,10 +38,26 @@ pub enum SudoMsg {
 #[cw_serde]
 pub struct MigrateMsg {}
 
+#[cw_serde]
+pub enum CounterPacketData {
+    Ok,
+    Fail,
+}
+
+#[cw_serde]
+pub enum CounterAckData {
+    Ok,
+    Fail,
+}
+
 #[derive(Default)]
 #[cw_serde]
 pub struct CounterConfig {
     pub counter_ibc_callback: u64,
+    pub counter_packet_receive: u64,
+    pub counter_packet_ack_ok: u64,
+    pub counter_packet_ack_failing: u64,
+    pub counter_ibc_hook: u64,
 }
 
 pub const COUNTER_CONFIG: Item<CounterConfig> = Item::new("counter_config");
@@ -59,7 +75,7 @@ pub fn instantiate(
 
 #[entry_point]
 pub fn execute(
-    _deps: DepsMut,
+    deps: DepsMut,
     _env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
@@ -67,6 +83,11 @@ pub fn execute(
     match msg {
         ExecuteMsg::SendPacket(msg) => Ok(Response::new().add_message(msg)),
         ExecuteMsg::JustReceive { msg, to_fail } => {
+            COUNTER_CONFIG.update(deps.storage, |mut val| -> StdResult<_> {
+                val.counter_ibc_hook += 1;
+                Ok(val)
+            })?;
+
             if to_fail {
                 Err(ContractError::Std(StdError::generic_err(msg)))
             } else {
@@ -121,7 +142,6 @@ pub fn _migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response,
 }
 
 #[entry_point]
-/// Enforces ordering and versioning constraints
 pub fn ibc_channel_open(
     _deps: DepsMut,
     _env: Env,
@@ -130,8 +150,6 @@ pub fn ibc_channel_open(
     Ok(None)
 }
 
-/// Not handled yet
-/// Should the contract remove the channel from the storage?
 #[entry_point]
 pub fn ibc_channel_close(
     _deps: DepsMut,
@@ -142,7 +160,6 @@ pub fn ibc_channel_close(
 }
 
 #[entry_point]
-/// Record the channel in CHANNEL_INFO
 pub fn ibc_channel_connect(
     _deps: DepsMut,
     _env: Env,
@@ -160,32 +177,57 @@ pub fn ibc_channel_connect(
 }
 
 #[entry_point]
-/// Receive a ibc packet.
-/// packet.data will be deserialized into GatePacket.
-/// If the packet contain `SendNativeInfo`, we store the packet and set into the ack the key for this packet (it will be executed when the contract will receives the native token).
-/// Otherwise we proceed executing the `Requests` contained in the packet.
+
 pub fn ibc_packet_receive(
-    _deps: DepsMut,
+    deps: DepsMut,
     _env: Env,
     msg: IbcPacketReceiveMsg,
 ) -> Result<IbcReceiveResponse, Never> {
-    println!("Packet_received: {:?}", msg);
-    Ok(IbcReceiveResponse::new(msg.packet.data))
+    println!("\nPacket_received: {:#?}", msg);
+    let ack = || -> StdResult<_> {
+        match from_json::<CounterPacketData>(&msg.packet.data)? {
+            CounterPacketData::Ok => {
+                COUNTER_CONFIG.update(deps.storage, |mut val| -> StdResult<_> {
+                    val.counter_packet_receive += 1;
+                    Ok(val)
+                })?;
+                Ok(CounterAckData::Ok)
+            }
+            CounterPacketData::Fail => Ok(CounterAckData::Fail),
+        }
+    }()
+    .unwrap_or(CounterAckData::Fail);
+
+    Ok(IbcReceiveResponse::new(to_json_binary(&ack).unwrap()))
 }
 
 #[entry_point]
-/// Matching the result in ack.data with `AckType` and execute the variant
 pub fn ibc_packet_ack(
-    _deps: DepsMut,
+    deps: DepsMut,
     _env: Env,
-    _msg: IbcPacketAckMsg,
+    msg: IbcPacketAckMsg,
 ) -> Result<IbcBasicResponse, ContractError> {
-    // println!("Packet_ack: {:?}", msg);
+    println!("\nPacket_ack: {:#?}", msg);
+
+    if let Ok(a) = from_json::<CounterAckData>(msg.acknowledgement.data) {
+        if let CounterAckData::Ok = a {
+            COUNTER_CONFIG.update(deps.storage, |mut val| -> StdResult<_> {
+                val.counter_packet_ack_ok += 1;
+                Ok(val)
+            })?;
+            return Ok(IbcBasicResponse::default());
+        }
+    };
+
+    COUNTER_CONFIG.update(deps.storage, |mut val| -> StdResult<_> {
+        val.counter_packet_ack_failing += 1;
+        Ok(val)
+    })?;
+
     Ok(IbcBasicResponse::default())
 }
 
 #[entry_point]
-/// Same case handled on `ibc_packet_ack` in `Error` scenario
 pub fn ibc_packet_timeout(
     _deps: DepsMut,
     _env: Env,

@@ -425,7 +425,7 @@ fn test_path() {
     assert_eq!(denom, "ibc/B3504E092456BA618CC28AC671A71FB08C6CA0FD0BE7C8A5B5A3E2DD933CC9E4");
 
     let path = "transfer/channel-0/transfer/channel-141/transfer/channel-42/transfer/channel-27";
-    let base_denom = "uluna";
+    let base_denom = "untrn";
     let denom = Ics20Helper::compute_ibc_denom_from_trace(&format!("{}/{}",path, base_denom));
 
     println!("{}", denom);

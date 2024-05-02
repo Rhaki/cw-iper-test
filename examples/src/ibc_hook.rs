@@ -12,9 +12,9 @@ use crate::mock_contracts::counter::{self, CounterConfig, CounterQueryMsg};
 
 struct TestIbcHookEnv {
     pub eco: Ecosystem,
-    pub terra: Rc<RefCell<BaseIperApp>>,
+    pub neutron: Rc<RefCell<BaseIperApp>>,
     pub osmosis: Rc<RefCell<BaseIperApp>>,
-    pub contract_terra: Addr,
+    pub contract_neutron: Addr,
     pub contract_osmosis: Addr,
 }
 
@@ -24,13 +24,13 @@ fn startup() -> TestIbcHookEnv {
         .build(no_init)
         .into_iper_app("osmosis");
 
-    let terra = IperAppBuilder::new("terra")
+    let neutron = IperAppBuilder::new("neutron")
         .with_ibc_app(IbcHook::new(Ics20))
         .build(no_init)
-        .into_iper_app("terra");
+        .into_iper_app("neutron");
 
     let eco = Ecosystem::default()
-        .add_app(terra.clone())
+        .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
     let contract = MultiContract::new(
@@ -64,16 +64,16 @@ fn startup() -> TestIbcHookEnv {
         None,
     );
 
-    let code_id_terra = terra.borrow_mut().store_ibc_code(contract);
+    let code_id_neutron = neutron.borrow_mut().store_ibc_code(contract);
 
-    let terra_owner = terra.borrow().app.api().addr_make("owner");
+    let neutron_owner = neutron.borrow().app.api().addr_make("owner");
 
-    let terra_contract_addr = terra
+    let neutron_contract_addr = neutron
         .borrow_mut()
         .app
         .instantiate_contract(
-            code_id_terra,
-            terra_owner,
+            code_id_neutron,
+            neutron_owner,
             &counter::InstantiateMsg {},
             &[],
             "label".to_string(),
@@ -87,7 +87,7 @@ fn startup() -> TestIbcHookEnv {
             IbcOrder::Unordered,
             "version",
             "connection_id",
-            "terra",
+            "neutron",
         ),
         IbcChannelCreator::new(
             IbcPort::from_application(Ics20),
@@ -101,9 +101,9 @@ fn startup() -> TestIbcHookEnv {
 
     TestIbcHookEnv {
         eco,
-        terra,
+        neutron,
         osmosis,
-        contract_terra: terra_contract_addr,
+        contract_neutron: neutron_contract_addr,
         contract_osmosis: osmosis_contract_addr,
     }
 }
@@ -112,16 +112,16 @@ fn startup() -> TestIbcHookEnv {
 fn ibc_hook_base() {
     let TestIbcHookEnv {
         eco,
-        terra,
+        neutron,
         osmosis,
         contract_osmosis,
         ..
     } = startup();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -145,13 +145,13 @@ fn ibc_hook_base() {
         ),
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -160,20 +160,24 @@ fn ibc_hook_base() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron
+        .borrow_mut()
+        .app
+        .execute(sender.clone(), msg)
+        .unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, Uint128::zero());
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -182,23 +186,33 @@ fn ibc_hook_base() {
         .query_balance(&contract_osmosis, ibc_denom)
         .unwrap();
 
-    assert_eq!(balance.amount, amount.amount)
+    assert_eq!(balance.amount, amount.amount);
+
+    let counter_ibc_hook = osmosis
+        .borrow()
+        .app
+        .wrap()
+        .query_wasm_smart::<CounterConfig>(&contract_osmosis, &CounterQueryMsg::Config)
+        .unwrap()
+        .counter_ibc_hook;
+
+    assert_eq!(counter_ibc_hook, 1)
 }
 
 #[test]
 fn ibc_hook_failing_execution() {
     let TestIbcHookEnv {
         eco,
-        terra,
+        neutron,
         osmosis,
         contract_osmosis,
         ..
     } = startup();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -220,13 +234,13 @@ fn ibc_hook_failing_execution() {
         ),
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -235,20 +249,24 @@ fn ibc_hook_failing_execution() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron
+        .borrow_mut()
+        .app
+        .execute(sender.clone(), msg)
+        .unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, amount.amount);
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -264,15 +282,15 @@ fn ibc_hook_failing_execution() {
 fn ibc_hook_empty_memo() {
     let TestIbcHookEnv {
         eco,
-        terra,
+        neutron,
         osmosis,
         ..
     } = startup();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -282,13 +300,13 @@ fn ibc_hook_empty_memo() {
         memo: None,
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .execute(sender.clone(), msg.clone())
         .unwrap_err();
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -297,20 +315,24 @@ fn ibc_hook_empty_memo() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron
+        .borrow_mut()
+        .app
+        .execute(sender.clone(), msg)
+        .unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, Uint128::zero());
 
     eco.relay_all_packets().unwrap();
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -326,17 +348,17 @@ fn ibc_hook_empty_memo() {
 fn ibc_hook_with_ibc_callback_ok() {
     let TestIbcHookEnv {
         eco,
-        terra,
+        neutron,
         osmosis,
         contract_osmosis,
-        contract_terra,
+        contract_neutron,
         ..
     } = startup();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -354,13 +376,13 @@ fn ibc_hook_with_ibc_callback_ok() {
                         to_fail: false,
                     },
                 }),
-                Some(contract_terra.to_string()),
+                Some(contract_neutron.to_string()),
             ))
             .unwrap(),
         ),
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -369,20 +391,24 @@ fn ibc_hook_with_ibc_callback_ok() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron
+        .borrow_mut()
+        .app
+        .execute(sender.clone(), msg)
+        .unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     assert_eq!(balance.amount, Uint128::zero());
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
@@ -393,11 +419,11 @@ fn ibc_hook_with_ibc_callback_ok() {
 
     assert_eq!(balance.amount, amount.amount);
 
-    let ibc_counter: CounterConfig = terra
+    let ibc_counter: CounterConfig = neutron
         .borrow()
         .app
         .wrap()
-        .query_wasm_smart(contract_terra, &CounterQueryMsg::Config)
+        .query_wasm_smart(contract_neutron, &CounterQueryMsg::Config)
         .unwrap();
 
     assert_eq!(ibc_counter.counter_ibc_callback, 1);
@@ -407,17 +433,17 @@ fn ibc_hook_with_ibc_callback_ok() {
 fn ibc_hook_with_ibc_callback_failing() {
     let TestIbcHookEnv {
         eco,
-        terra,
+        neutron,
         osmosis,
         contract_osmosis,
-        contract_terra,
+        contract_neutron,
         ..
     } = startup();
 
-    let sender = terra.borrow().app.api().addr_make("sender");
+    let sender = neutron.borrow().app.api().addr_make("sender");
     let receiver = osmosis.borrow().app.api().addr_make("receiver");
 
-    let amount = Coin::new(1_000_000_u128, "uluna");
+    let amount = Coin::new(1_000_000_u128, "untrn");
 
     let msg = CosmosMsg::Ibc(IbcMsg::Transfer {
         channel_id: "channel-0".to_string(),
@@ -435,13 +461,13 @@ fn ibc_hook_with_ibc_callback_failing() {
                         to_fail: false,
                     },
                 }),
-                Some(contract_terra.to_string()),
+                Some(contract_neutron.to_string()),
             ))
             .unwrap(),
         ),
     });
 
-    terra
+    neutron
         .borrow_mut()
         .app
         .sudo(SudoMsg::Bank(BankSudo::Mint {
@@ -450,15 +476,19 @@ fn ibc_hook_with_ibc_callback_failing() {
         }))
         .unwrap();
 
-    terra.borrow_mut().app.execute(sender.clone(), msg).unwrap();
+    neutron
+        .borrow_mut()
+        .app
+        .execute(sender.clone(), msg)
+        .unwrap();
 
     eco.relay_all_packets().unwrap();
 
-    let ibc_counter: CounterConfig = terra
+    let ibc_counter: CounterConfig = neutron
         .borrow()
         .app
         .wrap()
-        .query_wasm_smart(contract_terra, &CounterQueryMsg::Config)
+        .query_wasm_smart(contract_neutron, &CounterQueryMsg::Config)
         .unwrap();
 
     // For testing purposes, if the packet is timedout, after increasing the counter_ibc_callback the contract raises an error.
@@ -466,17 +496,17 @@ fn ibc_hook_with_ibc_callback_failing() {
 
     assert_eq!(ibc_counter.counter_ibc_callback, 0);
 
-    let balance = terra
+    let balance = neutron
         .borrow()
         .app
         .wrap()
-        .query_balance(&sender, "uluna")
+        .query_balance(&sender, "untrn")
         .unwrap();
 
     // Even if the ibc_callbacks failed the exectution, the funds transfer should be reverted.
     assert_eq!(balance.amount, balance.amount);
 
-    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/uluna");
+    let ibc_denom = Ics20Helper::compute_ibc_denom_from_trace("transfer/channel-0/untrn");
 
     let balance = osmosis
         .borrow()
