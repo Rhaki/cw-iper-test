@@ -6,10 +6,11 @@ use serde::de::DeserializeOwned;
 
 use crate::{
     chain_helper::ChainHelper,
-    ibc_app::{IbcApp, SharedChannels},
-    ibc_module::IbcModule,
+    ibc_module::IperIbcModule,
+    iper_app::{IperApp, SharedChannels},
 };
 
+/// Extension of [App] that implements the `into_iper_app` function, allowing the transformation of an [App] into a [IperApp]
 pub trait AppExt<
     BankT,
     MockApiBech32,
@@ -23,12 +24,14 @@ pub trait AppExt<
 > where
     CustomT::QueryT: CustomQuery,
 {
-    fn into_ibc_app(
+    /// Transform a standar [cw_multi_test::App] into [IperApp]
+    #[allow(clippy::type_complexity)]
+    fn into_iper_app(
         self,
         chain_id: impl Into<String>,
     ) -> Rc<
         RefCell<
-            IbcApp<
+            IperApp<
                 BankT,
                 MockApiBech32,
                 StorageT,
@@ -36,7 +39,7 @@ pub trait AppExt<
                 WasmT,
                 StakingT,
                 DistrT,
-                IbcModule,
+                IperIbcModule,
                 GovT,
                 StargateT,
             >,
@@ -54,7 +57,7 @@ impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, GovT, StargateT>
         WasmT,
         StakingT,
         DistrT,
-        IbcModule,
+        IperIbcModule,
         GovT,
         StargateT,
     >
@@ -70,12 +73,12 @@ where
     GovT: Gov,
     StargateT: Stargate,
 {
-    fn into_ibc_app(
+    fn into_iper_app(
         mut self,
         chain_id: impl Into<String>,
     ) -> Rc<
         RefCell<
-            IbcApp<
+            IperApp<
                 BankT,
                 MockApiBech32,
                 StorageT,
@@ -83,7 +86,7 @@ where
                 WasmT,
                 StakingT,
                 DistrT,
-                IbcModule,
+                IperIbcModule,
                 GovT,
                 StargateT,
             >,
@@ -96,7 +99,7 @@ where
             .save(self.storage_mut())
             .unwrap();
 
-        Rc::new(RefCell::new(IbcApp {
+        Rc::new(RefCell::new(IperApp {
             relayer: self.api().addr_make("default_relayer"),
             chain_id: chain_id.into(),
             app: self,

@@ -29,6 +29,7 @@ pub fn derive_ibc_port(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         impl #struct_name {
+            /// Ibc port name
             pub const IBC_PORT: &'static str = #f;
         }
         impl #prepath::ibc_application::IbcPortInterface for #struct_name {
@@ -150,7 +151,7 @@ fn is_internal() -> bool {
     {
         return true;
     }
-    return false;
+    false
 }
 
 fn prepath() -> proc_macro2::TokenStream {

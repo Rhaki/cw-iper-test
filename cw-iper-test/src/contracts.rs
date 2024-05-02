@@ -38,16 +38,23 @@ mod closures {
     pub type IbcPacketTimeoutClosure<E, Q, C>  = Box<dyn Fn(DepsMut<Q>, Env, IbcPacketTimeoutMsg)  -> Result<IbcBasicResponse<C>, E>>;
 }
 
+/// Structure containing the various `ibc closures`
 pub struct IbcClosures<E1, E2, E3, E4, E5, C, Q = Empty>
 where
     Q: CustomQuery,
     C: CustomMsg,
 {
+    /// `#[entry_point]` `ibc_channel_open` closure
     pub fn_ibc_channel_open: IbcChannelOpenClosure<E1, Q>,
+    /// `#[entry_point]` `ibc_channel_close` closure
     pub fn_ibc_channel_close: IbcChannelCloseClosure<E2, Q, C>,
+    /// `#[entry_point]` `ibc_channel_connect` closure
     pub fn_ibc_channel_connect: IbcChannelConnectClosure<E3, Q, C>,
+    /// `#[entry_point]` `ibc_packet_receive` closure
     pub fn_ibc_packet_receive: IbcPacketReceiveClosure<Q, C>,
+    /// `#[entry_point]` `ibc_packet_ack` closure
     pub fn_ibc_packet_ack: IbcPacketAckClosure<E4, Q, C>,
+    /// `#[entry_point]` `ibc_packet_timeout` closure
     pub fn_ibc_packet_timeout: IbcPacketTimeoutClosure<E5, Q, C>,
 }
 
@@ -61,6 +68,7 @@ where
     E4: Display + Debug + Send + Sync + 'static,
     E5: Display + Debug + Send + Sync + 'static,
 {
+    /// Constructor function
     pub fn new(
         fn_ibc_channel_open: IbcChannelOpenFn<E1, Q>,
         fn_ibc_channel_close: IbcChannelCloseFn<E2, Q, C>,
@@ -79,6 +87,7 @@ where
         }
     }
 
+    /// Create a new [`IbcClosures`] as [`IbcContract`]
     pub fn new_as_ibc_contract(
         fn_ibc_channel_open: IbcChannelOpenFn<E1, Q>,
         fn_ibc_channel_close: IbcChannelCloseFn<E2, Q, C>,
@@ -98,12 +107,15 @@ where
     }
 }
 
+/// Wrapper struct to store both default [`Contract`] trait and optional [`IbcContract`] trait
 pub struct MultiContract<C, Q = Empty>
 where
     C: CustomMsg,
     Q: CustomQuery,
 {
+    /// default [`Contract`] interface
     pub base: Box<dyn Contract<C, Q>>,
+    /// Optional [`IbcContract`] interface. Used only on `contracts` that implements `ibc entry_points`
     pub ibc: Option<Box<dyn IbcContract<C, Q>>>,
 }
 
@@ -112,6 +124,7 @@ where
     C: CustomMsg,
     Q: CustomQuery,
 {
+    /// Constructor function
     pub fn new(
         base: Box<dyn Contract<C, Q>>,
         ibc: Option<Box<dyn IbcContract<C, Q>>>,
@@ -120,41 +133,53 @@ where
     }
 }
 
+/// Similar to [`Contract`], this trait serves as a primary interface for interacting `ibc entry_points` functions.
 pub trait IbcContract<C, Q = Empty>
 where
     C: CustomMsg,
     Q: CustomQuery,
 {
+    /// Evaluates contract's `ibc_channel_open` `entry_point`.
     fn ibc_channel_open(
         &self,
         deps: DepsMut<Q>,
         env: Env,
         msg: IbcChannelOpenMsg,
     ) -> AppResult<Option<Ibc3ChannelOpenResponse>>;
+
+    /// Evaluates contract's `ibc_channel_close` `entry_point`.
     fn ibc_channel_close(
         &self,
         deps: DepsMut<Q>,
         env: Env,
         msg: IbcChannelCloseMsg,
     ) -> AppResult<IbcBasicResponse<C>>;
+
+    /// Evaluates contract's `ibc_channel_connect` `entry_point`.
     fn ibc_channel_connect(
         &self,
         deps: DepsMut<Q>,
         env: Env,
         msg: IbcChannelConnectMsg,
     ) -> AppResult<IbcBasicResponse<C>>;
+
+    /// Evaluates contract's `ibc_packet_receive` `entry_point`.
     fn ibc_packet_receive(
         &self,
         deps: DepsMut<Q>,
         env: Env,
         msg: IbcPacketReceiveMsg,
     ) -> AppResult<IbcReceiveResponse<C>>;
+
+    /// Evaluates contract's `ibc_packet_ack` `entry_point`.
     fn ibc_packet_ack(
         &self,
         deps: DepsMut<Q>,
         env: Env,
         msg: IbcPacketAckMsg,
     ) -> AppResult<IbcBasicResponse<C>>;
+
+    /// Evaluates contract's `ibc_packet_timeout` `entry_point`.
     fn ibc_packet_timeout(
         &self,
         deps: DepsMut<Q>,
@@ -227,6 +252,7 @@ where
     }
 }
 
+/// Extension of [`ContractWrapper`], allowing to transform it into [`Contract`] directly
 pub trait ContractWrapperExt<
     T1,
     T2,
@@ -256,6 +282,7 @@ pub trait ContractWrapperExt<
     C: CustomMsg,         // Type of custom message returned from all entry-points except `query`.
     Q: CustomQuery + DeserializeOwned,
 {
+    /// Transform [`ContractWrapper`] into [`Contract`]
     fn to_contract(self) -> Box<dyn Contract<C, Q>>;
 }
 

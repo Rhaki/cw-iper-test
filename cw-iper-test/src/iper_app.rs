@@ -20,15 +20,17 @@ use crate::{
         Channels, IbcChannelCreator, IbcChannelExt, IbcChannelStatus, IbcChannelWrapper, IbcPort,
     },
     ibc_module::{
-        emit_packet, AckPacket, AckResponse, IbcModule, IbcPacketType, OutgoingPacket,
+        emit_packet, AckPacket, AckResponse, IbcPacketType, IperIbcModule, OutgoingPacket,
         TimeoutPacket, PENDING_PACKETS,
     },
     response::IntoResponse,
-    stargate::StargateModule,
+    stargate::IperStargateModule,
 };
 
-pub type SharedChannels = Rc<RefCell<Channels>>;
-pub type BaseIbcApp = IbcApp<
+pub(crate) type SharedChannels = Rc<RefCell<Channels>>;
+
+/// Base [`IperApp`] with default [`IperApp`] modules.
+pub type BaseIperApp = IperApp<
     BankKeeper,
     MockApiBech32,
     MockStorage,
@@ -36,24 +38,40 @@ pub type BaseIbcApp = IbcApp<
     WasmKeeper<Empty, Empty>,
     StakeKeeper,
     DistributionKeeper,
-    IbcModule,
+    IperIbcModule,
     GovFailingModule,
-    StargateModule,
+    IperStargateModule,
 >;
 
-pub struct IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
+/// ### `cw-iper-test` Core Structure
+///
+/// This structure wraps a base [`App`] internally,
+/// extending its functionality. Specifically, it allows for:
+///
+/// - **Storing a `contract` with `IBC entry points`** using the [`IperApp::store_ibc_code`] function.
+/// - **Retrieving information and managing incoming and outgoing `IBC packets`**.
+///
+/// The packet management is invoked by the [`Ecosystem`](crate::ecosystem::Ecosystem) structure, which handles the automatic
+/// relay of `IBC packets`.
+///
+/// The struct expose the inner [`App`], allowing to use the standards methods.
+pub struct IperApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>
 where
     CustomT: Module,
 {
+    /// Default relayer address for packet relaying.
     pub relayer: Addr,
+    /// Chain name/id of the rappresenting chain.
     pub chain_id: String,
+    /// Inner [`App`]
     pub app: App<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcT, GovT, StargateT>,
-    pub code_ids: BTreeMap<u64, Box<dyn IbcContract<CustomT::ExecT, CustomT::QueryT>>>,
+    /// Stored `ibc channels`
     pub channels: SharedChannels,
+    pub(crate) code_ids: BTreeMap<u64, Box<dyn IbcContract<CustomT::ExecT, CustomT::QueryT>>>,
 }
 
 impl<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, GovT, StargateT>
-    IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcModule, GovT, StargateT>
+    IperApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IperIbcModule, GovT, StargateT>
 where
     BankT: Bank + 'static,
     ApiT: Api + 'static,
@@ -67,6 +85,8 @@ where
     CustomT::QueryT: CustomQuery + DeserializeOwned + 'static,
     StargateT: Stargate + 'static,
 {
+    /// Store a contract.
+    /// This function can be used to store both `non ibc contracts` and `ibc contracts`.
     pub fn store_ibc_code(
         &mut self,
         contract: MultiContract<CustomT::ExecT, CustomT::QueryT>,
@@ -77,6 +97,8 @@ where
         }
         code_id
     }
+
+    /// Get info about a specific `pending packet`.
     pub fn get_pending_packet(&self, packet_id: u64) -> AppResult<IbcPacketType> {
         let packets = PENDING_PACKETS.load(self.app.storage())?;
         packets
@@ -85,19 +107,13 @@ where
             .ok_or(anyhow!("Packet not found"))
     }
 
+    /// Get all `pending packets`.
     pub fn get_pending_packets(&self) -> AppResult<BTreeMap<u64, IbcPacketType>> {
         let packets = PENDING_PACKETS.load(self.app.storage()).unwrap_or_default();
         Ok(packets)
     }
 
-    pub fn get_next_pending_packet(&self) -> AppResult<u64> {
-        let packets = PENDING_PACKETS.load(self.app.storage())?;
-        packets
-            .first_key_value()
-            .map(|(k, _)| *k)
-            .ok_or(anyhow!("No pending packets"))
-    }
-
+    /// Return `true` if the are some `pending packets`.
     pub fn some_pending_packets(&self) -> bool {
         PENDING_PACKETS
             .load(self.app.storage())
@@ -105,6 +121,9 @@ where
             .unwrap_or(false)
     }
 
+    /// Delete a specific `pending packets`.
+    ///
+    /// This function is exposed only for testing purpose, is shouldn't be used during normal tests.
     pub fn remove_packet(&mut self, packet_id: u64) -> AppResult<()> {
         let mut packets = PENDING_PACKETS.load(self.app.storage())?;
         packets.remove(&packet_id);
@@ -112,7 +131,15 @@ where
         Ok(())
     }
 
-    pub fn open_channel(
+    pub(crate) fn get_next_pending_packet(&self) -> AppResult<u64> {
+        let packets = PENDING_PACKETS.load(self.app.storage())?;
+        packets
+            .first_key_value()
+            .map(|(k, _)| *k)
+            .ok_or(anyhow!("No pending packets"))
+    }
+
+    pub(crate) fn open_channel(
         &mut self,
         local: &IbcChannelCreator,
         remote: &IbcChannelCreator,
@@ -153,7 +180,7 @@ where
         Ok(channel_wrapper)
     }
 
-    pub fn channel_connect(&mut self, channel_id: u64) -> AppResult<()> {
+    pub(crate) fn channel_connect(&mut self, channel_id: u64) -> AppResult<()> {
         let mut channels = self.channels.borrow_mut();
         let channel = channels.get_mut(channel_id)?;
         let msg = match channel.status {
@@ -202,7 +229,7 @@ where
         Ok(())
     }
 
-    pub fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<MayResponse> {
+    pub(crate) fn incoming_packet(&mut self, packet: IbcPacketType) -> AppResult<MayResponse> {
         match packet {
             IbcPacketType::AckPacket(packet) => Ok(MayResponse::Ok(self.packet_ack(packet)?)),
             IbcPacketType::OutgoingPacket(packet) => self.packet_receive(packet),
@@ -220,7 +247,7 @@ where
         }
     }
 
-    pub fn packet_receive(&mut self, packet: OutgoingPacket) -> AppResult<MayResponse> {
+    pub(crate) fn packet_receive(&mut self, packet: OutgoingPacket) -> AppResult<MayResponse> {
         let mut channels = self.channels.borrow_mut();
 
         let channel = channels.get_mut(packet.dest.channel_id.clone())?;
@@ -329,7 +356,7 @@ where
         }
     }
 
-    pub fn packet_ack(&mut self, mut packet: AckPacket) -> AppResult<AppResponse> {
+    pub(crate) fn packet_ack(&mut self, mut packet: AckPacket) -> AppResult<AppResponse> {
         let channel = packet.get_src_channel();
 
         let channels = self.channels.borrow();
@@ -364,7 +391,7 @@ where
         }
     }
 
-    pub fn packet_timeout(&mut self, packet: TimeoutPacket) -> AppResult<AppResponse> {
+    pub(crate) fn packet_timeout(&mut self, packet: TimeoutPacket) -> AppResult<AppResponse> {
         let channel = packet.original_packet.packet.src.channel_id.clone();
 
         let channels = self.channels.borrow();
@@ -408,7 +435,7 @@ where
         }
     }
 
-    pub fn get_next_channel_id(&self) -> u64 {
+    pub(crate) fn get_next_channel_id(&self) -> u64 {
         self.channels.borrow().next_key()
     }
 
@@ -443,7 +470,7 @@ where
     }
 }
 
-pub trait IbcAppRef {
+pub trait IperAppRef {
     fn chain_id(&self) -> &str;
     fn channel_connect(&mut self, channel_id: u64) -> AppResult<()>;
     fn get_next_channel_id(&self) -> u64;
@@ -462,8 +489,19 @@ pub trait IbcAppRef {
     fn get_channel_info(&self, local_channel_id: String) -> AppResult<IbcChannelWrapper>;
 }
 
-impl<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, GovT, StargateT> IbcAppRef
-    for IbcApp<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, IbcModule, GovT, StargateT>
+impl<BankT, ApiT, StorageT, CustomT, WasmT, StakingT, DistrT, GovT, StargateT> IperAppRef
+    for IperApp<
+        BankT,
+        ApiT,
+        StorageT,
+        CustomT,
+        WasmT,
+        StakingT,
+        DistrT,
+        IperIbcModule,
+        GovT,
+        StargateT,
+    >
 where
     BankT: Bank + 'static,
     ApiT: Api + 'static,

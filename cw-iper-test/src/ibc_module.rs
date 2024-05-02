@@ -2,8 +2,8 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc, u64};
 
 use crate::{
     ibc::IbcChannelWrapper,
-    ibc_app::InfallibleResult,
     ibc_application::{IbcApplication, PacketReceiveFailing, PacketReceiveOk},
+    iper_app::InfallibleResult,
     router::{RouterWrapper, UseRouter, UseRouterResponse},
 };
 
@@ -22,19 +22,32 @@ use serde::de::DeserializeOwned;
 use crate::{
     error::AppResult,
     ibc::{IbcMsgExt, IbcPort},
-    ibc_app::SharedChannels,
+    iper_app::SharedChannels,
     router_closure,
 };
 
-pub const PENDING_PACKETS: Item<BTreeMap<u64, IbcPacketType>> = Item::new("pending_packets");
+pub(crate) const PENDING_PACKETS: Item<BTreeMap<u64, IbcPacketType>> = Item::new("pending_packets");
+
+/// The [`IperIbcModule`] is the default struct used in an [`IperApp`](crate::iper_app::IperApp) as an `IBC module` and contains all [`IbcApplication`].
+///
+/// This structure implements the [`Module`] and [`Ibc`] `traits` from `cw-multi-test`.
+///
+/// When an [`IbcMsg`] needs to be handled, if the `src channel-id` matches a `port` of a saved [`IbcApplication`] within the
+/// [`IperIbcModule`], the [`IbcApplication::handle_outgoing_packet`] function is called.
+///
+/// [`IbcApplication`] instances must be added to the [`IperIbcModule`] during the creation of the [`App`](cw_multi_test::App)
+/// via the [`AppBuilder`](cw_multi_test::AppBuilder). This is achieved using the [`AppBuilderIperExt::with_ibc_app`](crate::iper_app_builder::AppBuilderIperExt) function.
+///
+/// It is essential that the `IBC module` in the [`AppBuilder`](cw_multi_test::AppBuilder) is set to [`IperIbcModule`] for this integration
+/// to function correctly.
 
 #[derive(Default)]
-pub struct IbcModule {
-    pub applications: BTreeMap<String, Rc<RefCell<dyn IbcApplication>>>,
-    pub channels: SharedChannels,
+pub struct IperIbcModule {
+    pub(crate) applications: BTreeMap<String, Rc<RefCell<dyn IbcApplication>>>,
+    pub(crate) channels: SharedChannels,
 }
 
-impl IbcModule {
+impl IperIbcModule {
     fn load_application(
         &self,
         name: impl Into<String> + Clone,
@@ -44,7 +57,7 @@ impl IbcModule {
             .ok_or(anyhow!("application not found: {}", name.into()))
     }
 
-    pub fn open_channel<ExecC, QueryC>(
+    pub(crate) fn open_channel<ExecC, QueryC>(
         &self,
         api: &dyn Api,
         storage: &mut dyn Storage,
@@ -68,7 +81,7 @@ impl IbcModule {
         )
     }
 
-    pub fn channel_connect<ExecC, QueryC>(
+    pub(crate) fn channel_connect<ExecC, QueryC>(
         &self,
         api: &dyn Api,
         storage: &mut dyn Storage,
@@ -94,7 +107,7 @@ impl IbcModule {
             )
     }
 
-    pub fn packet_receive<ExecC, QueryC>(
+    pub(crate) fn packet_receive<ExecC, QueryC>(
         &self,
         api: &dyn Api,
         storage: &mut dyn Storage,
@@ -121,7 +134,7 @@ impl IbcModule {
             )
     }
 
-    pub fn packet_ack<ExecC, QueryC>(
+    pub(crate) fn packet_ack<ExecC, QueryC>(
         &self,
         api: &dyn Api,
         storage: &mut dyn Storage,
@@ -145,7 +158,7 @@ impl IbcModule {
         )
     }
 
-    pub fn packet_timeout<ExecC, QueryC>(
+    pub(crate) fn packet_timeout<ExecC, QueryC>(
         &self,
         api: &dyn Api,
         storage: &mut dyn Storage,
@@ -170,7 +183,7 @@ impl IbcModule {
     }
 }
 
-impl Module for IbcModule {
+impl Module for IperIbcModule {
     type ExecT = IbcMsg;
     type QueryT = IbcQuery;
     type SudoT = Empty;
@@ -236,7 +249,7 @@ impl Module for IbcModule {
     }
 }
 
-impl Ibc for IbcModule {}
+impl Ibc for IperIbcModule {}
 
 #[cw_serde]
 pub enum IbcPacketType {
@@ -333,7 +346,7 @@ impl AckPacket {
 }
 
 #[cw_serde]
-pub struct AckResponse {
+pub(crate) struct AckResponse {
     pub ack: Option<Binary>,
     pub success: bool,
 }
@@ -348,7 +361,7 @@ impl OutgoingPacket {
     }
 }
 
-pub fn emit_packet_boxed(
+pub(crate) fn emit_packet_boxed(
     packet: IbcPacketType,
     rc_storage: &Rc<RefCell<&mut dyn Storage>>,
 ) -> AppResult<()> {
@@ -361,7 +374,7 @@ pub fn emit_packet_boxed(
     Ok(())
 }
 
-pub fn emit_packet(packet: IbcPacketType, storage: &mut dyn Storage) -> AppResult<()> {
+pub(crate) fn emit_packet(packet: IbcPacketType, storage: &mut dyn Storage) -> AppResult<()> {
     let mut packets = PENDING_PACKETS.load(storage).unwrap_or_default();
     let new_key = packets.last_key_value().map(|(k, _)| *k).unwrap_or(0) + 1;
     packets.insert(new_key, packet);

@@ -2,36 +2,32 @@ use std::{cell::RefCell, rc::Rc};
 
 use cosmwasm_std::{Addr, Coin, CosmosMsg, IbcMsg, IbcOrder, IbcTimeout, Timestamp, Uint128};
 use cw_iper_test::{
-    app_ext::AppExt,
-    contracts::{ContractWrapperExt, MultiContract},
     cw_multi_test::{no_init, BankSudo, ContractWrapper, Executor, SudoMsg},
-    ecosystem::Ecosystem,
-    ibc::{IbcChannelCreator, IbcPort},
-    ibc_app::BaseIbcApp,
-    ibc_app_builder::{AppBuilderIbcExt, IbcAppBuilder},
     ibc_applications::{IbcHook, Ics20, Ics20Helper, MemoField, WasmField},
+    AppBuilderIperExt, AppExt, BaseIperApp, ContractWrapperExt, Ecosystem, IbcChannelCreator,
+    IbcPort, IperAppBuilder, MultiContract,
 };
 
 use crate::mock_contracts::counter::{self, CounterConfig, CounterQueryMsg};
 
 struct TestIbcHookEnv {
     pub eco: Ecosystem,
-    pub terra: Rc<RefCell<BaseIbcApp>>,
-    pub osmosis: Rc<RefCell<BaseIbcApp>>,
+    pub terra: Rc<RefCell<BaseIperApp>>,
+    pub osmosis: Rc<RefCell<BaseIperApp>>,
     pub contract_terra: Addr,
     pub contract_osmosis: Addr,
 }
 
 fn startup() -> TestIbcHookEnv {
-    let osmosis = IbcAppBuilder::new("osmo")
+    let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(IbcHook::new(Ics20))
         .build(no_init)
-        .into_ibc_app("osmosis");
+        .into_iper_app("osmosis");
 
-    let terra = IbcAppBuilder::new("terra")
+    let terra = IperAppBuilder::new("terra")
         .with_ibc_app(IbcHook::new(Ics20))
         .build(no_init)
-        .into_ibc_app("terra");
+        .into_iper_app("terra");
 
     let eco = Ecosystem::default()
         .add_app(terra.clone())
@@ -135,16 +131,16 @@ fn ibc_hook_base() {
             osmosis.borrow().app.block_info().time.seconds() + 1,
         )),
         memo: Some(
-            serde_json::to_string_pretty(&MemoField {
-                wasm: Some(WasmField {
+            serde_json::to_string_pretty(&MemoField::new(
+                Some(WasmField {
                     contract: contract_osmosis.to_string(),
                     msg: counter::ExecuteMsg::JustReceive {
                         msg: "test".to_string(),
                         to_fail: false,
                     },
                 }),
-                ibc_callback: None,
-            })
+                None,
+            ))
             .unwrap(),
         ),
     });
@@ -210,16 +206,16 @@ fn ibc_hook_failing_execution() {
         amount: amount.clone(),
         timeout: IbcTimeout::with_timestamp(osmosis.borrow().app.block_info().time.plus_seconds(1)),
         memo: Some(
-            serde_json::to_string_pretty(&MemoField {
-                wasm: Some(WasmField {
+            serde_json::to_string_pretty(&MemoField::new(
+                Some(WasmField {
                     contract: contract_osmosis.to_string(),
                     msg: counter::ExecuteMsg::JustReceive {
                         msg: "test".to_string(),
                         to_fail: true,
                     },
                 }),
-                ibc_callback: None,
-            })
+                None,
+            ))
             .unwrap(),
         ),
     });
@@ -350,16 +346,16 @@ fn ibc_hook_with_ibc_callback_ok() {
             osmosis.borrow().app.block_info().time.seconds() + 1,
         )),
         memo: Some(
-            serde_json::to_string_pretty(&MemoField {
-                wasm: Some(WasmField {
+            serde_json::to_string_pretty(&MemoField::new(
+                Some(WasmField {
                     contract: contract_osmosis.to_string(),
                     msg: counter::ExecuteMsg::JustReceive {
                         msg: "test".to_string(),
                         to_fail: false,
                     },
                 }),
-                ibc_callback: Some(contract_terra.to_string()),
-            })
+                Some(contract_terra.to_string()),
+            ))
             .unwrap(),
         ),
     });
@@ -431,16 +427,16 @@ fn ibc_hook_with_ibc_callback_failing() {
             osmosis.borrow().app.block_info().time.seconds() - 1,
         )),
         memo: Some(
-            serde_json::to_string_pretty(&MemoField {
-                wasm: Some(WasmField {
+            serde_json::to_string_pretty(&MemoField::new(
+                Some(WasmField {
                     contract: contract_osmosis.to_string(),
                     msg: counter::ExecuteMsg::JustReceive {
                         msg: "test".to_string(),
                         to_fail: false,
                     },
                 }),
-                ibc_callback: Some(contract_terra.to_string()),
-            })
+                Some(contract_terra.to_string()),
+            ))
             .unwrap(),
         ),
     });

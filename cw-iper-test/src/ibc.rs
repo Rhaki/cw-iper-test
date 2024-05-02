@@ -10,8 +10,8 @@ use ibc_proto::ibc::{apps::transfer::v2::FungibleTokenPacketData, core::client::
 
 use crate::{
     error::AppResult,
-    ibc_application::IbcApplication,
     ibc_module::{IbcPacketType, OutgoingPacket},
+    IbcApplication,
 };
 
 #[derive(Clone)]
@@ -92,8 +92,11 @@ impl Channelable for String {
 
     fn as_channel_number(&self) -> AppResult<u64> {
         self.strip_prefix("channel-")
-            .ok_or(anyhow!("invalid channel id"))
-            .and_then(|s| s.parse::<u64>().map_err(|_| anyhow!("invalid channel id")))
+            .ok_or(anyhow!("invalid `channel-id`"))
+            .and_then(|s| {
+                s.parse::<u64>()
+                    .map_err(|_| anyhow!("invalid `channel-id`"))
+            })
     }
 }
 
@@ -104,8 +107,11 @@ impl Channelable for &str {
 
     fn as_channel_number(&self) -> AppResult<u64> {
         self.strip_prefix("channel-")
-            .ok_or(anyhow!("invalid channel id"))
-            .and_then(|s| s.parse::<u64>().map_err(|_| anyhow!("invalid channel id")))
+            .ok_or(anyhow!("invalid `channel-id`"))
+            .and_then(|s| {
+                s.parse::<u64>()
+                    .map_err(|_| anyhow!("invalid `channel-id`"))
+            })
     }
 }
 
@@ -118,6 +124,7 @@ pub enum IbcChannelStatus {
 }
 
 impl IbcChannelStatus {
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_next_status(&mut self) -> AppResult<()> {
         match self {
             IbcChannelStatus::Created => *self = IbcChannelStatus::Opening,
@@ -129,37 +136,48 @@ impl IbcChannelStatus {
     }
 }
 
+/// Define the `port` type of a ibc-channel
 #[cw_serde]
 pub enum IbcPort {
+    /// `smart-contract` port address. The contract has to implement the `ibc entry_points`.
     Contract(Addr),
+    /// [`IbcApplication`](crate::ibc_application::IbcApplication) port name.
     Module(String),
 }
 
 impl IbcPort {
-    pub fn port_name(&self) -> String {
+    pub(crate) fn port_name(&self) -> String {
         match self {
             IbcPort::Contract(addr) => addr.to_string(),
             IbcPort::Module(name) => name.clone(),
         }
     }
 
+    /// Create a a [`IbcPort`] from [`IbcApplication`]
     pub fn from_application(ibc_application: impl IbcApplication) -> Self {
         Self::Module(ibc_application.port_name())
     }
 }
 
+///
 #[cw_serde]
 #[non_exhaustive]
 pub struct IbcChannelCreator {
+    /// Channel `port`
     pub port: IbcPort,
+    /// Channel packet `order`
     pub order: IbcOrder,
+    /// Channel packet `version`
     pub version: String,
+    /// Channel `connection_id`
     pub connection_id: String,
+    /// Chain name. This value has to be equal to [`IperApp::chain_id`](crate::iper_app::IperApp)
     pub chain_id: String,
     channel_id: Option<u64>,
 }
 
 impl IbcChannelCreator {
+    /// Constructor function
     pub fn new(
         port: IbcPort,
         order: IbcOrder,
@@ -177,15 +195,15 @@ impl IbcChannelCreator {
         }
     }
 
-    pub fn channel_id(&self) -> AppResult<u64> {
+    pub(crate) fn channel_id(&self) -> AppResult<u64> {
         self.channel_id.ok_or(anyhow!("channel-id not set"))
     }
 
-    pub fn set_channel_id(&mut self, channe_id: u64) {
+    pub(crate) fn set_channel_id(&mut self, channe_id: u64) {
         self.channel_id = Some(channe_id);
     }
 
-    pub fn as_endpoint(&self) -> AppResult<IbcEndpoint> {
+    pub(crate) fn as_endpoint(&self) -> AppResult<IbcEndpoint> {
         Ok(IbcEndpoint {
             port_id: self.port.port_name(),
             channel_id: self
@@ -296,4 +314,3 @@ pub fn create_ibc_timeout(nanos: u64, height: Option<Height>) -> IbcTimeout {
         ),
     }
 }
-

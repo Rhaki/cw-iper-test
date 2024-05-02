@@ -8,15 +8,32 @@ use cw_multi_test::{
 
 use crate::{
     ibc_application::IbcApplication,
-    ibc_module::IbcModule,
-    stargate::{StargateApplication, StargateModule},
+    ibc_module::IperIbcModule,
+    stargate::{IperStargateModule, StargateApplication},
 };
 
-pub struct IbcAppBuilder {}
+/// Shorthcut of [`AppBuilder`] version for [`IperApp`](crate::iper_app::IperApp) that create an [`AppBuilder`] with:
+/// - `api`:  [`MockApiBech32`];
+/// - `ibc`: [`IperIbcModule`];
+/// - `stargate`: [`IperStargateModule`].
+///
+/// Calling [`IperAppBuilder::new`] is equal to create an [`AppBuilder`] with:
+/// ```ignore
+/// AppBuilder::new()
+///     .with_ibc(IperIbcModule::default())
+///     .with_stargate(IperStargateModule::default())
+///     .with_api(MockApiBech32::new("prefix"))
+pub struct IperAppBuilder;
 
-impl IbcAppBuilder {
+impl IperAppBuilder {
     #[allow(clippy::type_complexity)]
     #[allow(clippy::new_ret_no_self)]
+    /// Create a new [`AppBuilder`] as:
+    /// ```ignore
+    /// AppBuilder::new()
+    ///     .with_ibc(IperIbcModule::default())
+    ///     .with_stargate(IperStargateModule::default())
+    ///     .with_api(MockApiBech32::new("prefix"))
     pub fn new(
         prefix: &'static str,
     ) -> AppBuilder<
@@ -27,25 +44,32 @@ impl IbcAppBuilder {
         WasmKeeper<Empty, Empty>,
         StakeKeeper,
         DistributionKeeper,
-        IbcModule,
+        IperIbcModule,
         GovFailingModule,
-        StargateModule,
+        IperStargateModule,
     > {
         AppBuilder::new()
-            .with_ibc(IbcModule::default())
-            .with_stargate(StargateModule::default())
+            .with_ibc(IperIbcModule::default())
+            .with_stargate(IperStargateModule::default())
             .with_api(MockApiBech32::new(prefix))
     }
 }
 
-pub trait AppBuilderIbcExt: Sized {
+/// Trait implemented in [`AppBuilder`] where:
+/// - `api`:  [`MockApiBech32`];
+/// - `ibc`: [`IperIbcModule`];
+/// - `stargate`: [`IperStargateModule`].
+///
+/// The function [`AppBuilderIperExt::with_ibc_app`] allow to insert a struct that implement both [`IbcApplication`] + [StargateApplication] inside [`IperIbcModule`] and [`IperStargateModule`].
+pub trait AppBuilderIperExt: Sized {
+    /// insert a struct that implement both [`IbcApplication`] + [StargateApplication] inside the [`IperIbcModule`] and [`IperStargateModule`].
     fn with_ibc_app<T: IbcApplication + StargateApplication + 'static>(
         self,
         application: T,
     ) -> Self;
 }
 
-impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, GovT> AppBuilderIbcExt
+impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, GovT> AppBuilderIperExt
     for AppBuilder<
         BankT,
         MockApiBech32,
@@ -54,9 +78,9 @@ impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, GovT> AppBuilder
         WasmT,
         StakingT,
         DistrT,
-        IbcModule,
+        IperIbcModule,
         GovT,
-        StargateModule,
+        IperStargateModule,
     >
 where
     StorageT: Storage,
@@ -90,7 +114,14 @@ where
     }
 }
 
+/// Trait implemented in [`AppBuilder`] where:
+/// - `api`:  [`MockApiBech32`];
+/// - `stargate`: [`IperStargateModule`].
+///
+/// The function [`AppBuilderIperExt::with_stargate_app`] allow to insert a struct that implement [StargateApplication] inside [`IperStargateModule`].
+
 pub trait AppBuilderStargateExt: Sized {
+    /// Insert a struct that implement [StargateApplication] inside [`IperStargateModule`].
     fn with_stargate_app<T: StargateApplication + 'static>(self, application: T) -> Self;
 }
 
@@ -105,7 +136,7 @@ impl<BankT, StorageT, CustomT: Module, WasmT, StakingT, DistrT, IbcT, GovT> AppB
         DistrT,
         IbcT,
         GovT,
-        StargateModule,
+        IperStargateModule,
     >
 where
     StorageT: Storage,

@@ -5,9 +5,9 @@ use cw_multi_test::AppResponse;
 
 use crate::{
     error::AppResult,
-    ibc_app::InfallibleResult,
     ibc_application::{PacketReceiveFailing, PacketReceiveOk},
     ibc_module::IbcPacketType,
+    iper_app::InfallibleResult,
 };
 
 #[derive(Debug, Clone)]

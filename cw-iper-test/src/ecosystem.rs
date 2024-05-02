@@ -1,25 +1,34 @@
 use crate::{
     error::AppResult,
     ibc::IbcChannelCreator,
-    ibc_app::{IbcAppRef, MayResponse},
     ibc_module::IbcPacketType,
+    iper_app::{IperAppRef, MayResponse},
 };
 use anyhow::anyhow;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 #[derive(Default)]
+/// This structure acts as a wrapper containing all [`IperApp`](crate::iper_app::IperApp).
+///
+/// Its primary purpose is to relay `IBC` `packets` and to facilitate the creation of `IBC` `channels` among various [`IperApp`](crate::iper_app::IperApp).
+///
+/// [`IperApp`](crate::iper_app::IperApp)s are stored as [`IperAppRef`] traits instead of as [`IperApp`](crate::iper_app::IperApp) instances.
+/// This approach is used to decouple them from the specific typing of the generic parameters
+/// required by the [`IperApp`](crate::iper_app::IperApp) and [`App`](cw_multi_test::App) classes.
 pub struct Ecosystem {
-    apps: BTreeMap<String, Rc<RefCell<dyn IbcAppRef>>>,
+    apps: BTreeMap<String, Rc<RefCell<dyn IperAppRef>>>,
 }
 
 impl Ecosystem {
-    pub fn add_app(self, app: Rc<RefCell<dyn IbcAppRef>>) -> Self {
+    /// Add a [`IperApp`](crate::iper_app::IperApp) as [`IperAppRef`]
+    pub fn add_app(self, app: Rc<RefCell<dyn IperAppRef>>) -> Self {
         let mut apps = self.apps;
         let chain_id = app.borrow().chain_id().to_string();
         apps.insert(chain_id, app);
         Self { apps }
     }
 
+    /// Open a `IbcChannel` bewteen two [`IperApp`](crate::iper_app::IperApp)
     pub fn open_ibc_channel(
         &self,
         mut channel_1: IbcChannelCreator,
@@ -51,6 +60,10 @@ impl Ecosystem {
         Ok(())
     }
 
+    /// Relay all `packets` untill not `packets` are in pending.
+    /// The order is based on the [`BTreeMap`] key orders.
+    /// Iterating all [`IperApp`](crate::iper_app::IperApp), if one [`IperApp`](crate::iper_app::IperApp) has not pending packets, next [`IperApp`](crate::iper_app::IperApp) is checked.
+    /// Once one `packet` is `relayed`, the loop is restarted from the first [`IperApp`](crate::iper_app::IperApp)
     pub fn relay_all_packets(&self) -> AppResult<Vec<MayResponse>> {
         let mut res = vec![];
 
@@ -71,12 +84,14 @@ impl Ecosystem {
         Ok(res)
     }
 
+    /// Relay the next `packet` of a specific [`IperApp`](crate::iper_app::IperApp)
     pub fn relay_next_packet(&self, chain_id: impl Into<String> + Clone) -> AppResult<MayResponse> {
         let app = self.get_app(chain_id.clone())?;
         let packet_id = app.borrow().get_next_pending_packet()?;
         self.relay_packet(chain_id, packet_id)
     }
 
+    /// Relay as specific `packet` of a specific [`IperApp`](crate::iper_app::IperApp)
     pub fn relay_packet(
         &self,
         chain_id: impl Into<String>,
@@ -99,6 +114,7 @@ impl Ecosystem {
         Ok(response)
     }
 
+    /// Return all pending `packets` between all [`IperApp`](crate::iper_app::IperApp)
     pub fn get_all_pending_packets(
         &self,
     ) -> AppResult<BTreeMap<String, BTreeMap<u64, IbcPacketType>>> {
@@ -111,7 +127,7 @@ impl Ecosystem {
         Ok(map)
     }
 
-    fn get_app(&self, chain_id: impl Into<String>) -> AppResult<&Rc<RefCell<dyn IbcAppRef>>> {
+    fn get_app(&self, chain_id: impl Into<String>) -> AppResult<&Rc<RefCell<dyn IperAppRef>>> {
         let chain_id: String = chain_id.into();
         self.apps
             .get(&chain_id)

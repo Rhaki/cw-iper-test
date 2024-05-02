@@ -4,6 +4,7 @@ use bech32::{encode as bech32_encode, Bech32, Hrp};
 
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Coin, Empty, Uint128};
+use serde::{Deserialize, Serialize};
 
 use std::str::FromStr;
 use std::{cell::RefCell, rc::Rc};
@@ -17,9 +18,9 @@ use ibc_proto::ibc::apps::transfer::v2::FungibleTokenPacketData;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::ibc_app::InfallibleResult;
 use crate::ibc_application::PacketReceiveFailing;
 use crate::ibc_module::{AckPacket, TimeoutPacket};
+use crate::iper_app::InfallibleResult;
 use crate::middleware::{IbcAndStargate, MidRecFailing, MidRecOk, Middleware, MiddlewareResponse};
 use crate::{
     chain_helper::ChainHelper, error::AppResult, ibc_application::PacketReceiveOk,
@@ -29,11 +30,15 @@ use crate::{
 use super::ics20::FungibleTokenPacketAck;
 use super::MemoField;
 
+/// `IbcHook` implementation as [`Middleware`]
 pub struct IbcHook {
+    /// Inner [`IbcApplication`](crate::ibc_application::IbcApplication). It should be [`Ics20`](crate::ibc_applications::Ics20)
+    /// or another [`Middleware`] that wrap [`Ics20`](crate::ibc_applications::Ics20).
     pub inner: Box<dyn IbcAndStargate>,
 }
 
 impl IbcHook {
+    /// Constructor
     pub fn new<T: IbcAndStargate + 'static>(inner: T) -> Self {
         Self {
             inner: Box::new(inner),
@@ -48,7 +53,7 @@ impl IbcHook {
         _storage: Rc<RefCell<&mut dyn Storage>>,
         packet: AckOrTimeout,
     ) -> AppResult<AppResponse> {
-        let data: FungibleTokenPacketData = from_json(&packet.get_original_packet().data)?;
+        let data: FungibleTokenPacketData = from_json(packet.get_original_packet().data)?;
 
         if let Ok(wasm_field) = serde_json::from_str::<MemoField<Value>>(&data.memo) {
             if let Some(contract_addr) = wasm_field.ibc_callback {
@@ -223,9 +228,19 @@ impl Middleware for IbcHook {
     }
 }
 
+/// Message type for `sudo` entry_point triggered during `ibc_callback`
+#[cw_serde]
+pub enum IbcHookSudoMsg {
+    /// `ibc_callback` msg variant
+    #[serde(rename = "ibc_lifecycle_complete")]
+    IBCLifecycleComplete(IBCLifecycleComplete),
+}
+
+///
 #[cw_serde]
 pub enum IBCLifecycleComplete {
     #[serde(rename = "ibc_ack")]
+    /// Acknowledge from destination chain
     IBCAck {
         /// The source channel (osmosis side) of the IBC packet
         channel: String,
@@ -236,6 +251,7 @@ pub enum IBCLifecycleComplete {
         /// Weather an `Ack` is a success of failure according to the transfer spec
         success: bool,
     },
+    /// Timeout from destination chain
     #[serde(rename = "ibc_timeout")]
     IBCTimeout {
         /// The source channel (osmosis side) of the IBC packet
@@ -243,13 +259,6 @@ pub enum IBCLifecycleComplete {
         /// The sequence number that the packet was sent with
         sequence: u64,
     },
-}
-
-/// Message type for `sudo` entry_point
-#[cw_serde]
-pub enum IbcHookSudoMsg {
-    #[serde(rename = "ibc_lifecycle_complete")]
-    IBCLifecycleComplete(IBCLifecycleComplete),
 }
 
 struct IbcHookHelper;
@@ -286,6 +295,15 @@ impl AckOrTimeout {
             AckOrTimeout::Timeout(timeout) => timeout.original_packet.packet.clone(),
         }
     }
+}
+
+/// Wasm field of [`MemoField`] to trigger `ibc hook`
+#[derive(Serialize, Deserialize)]
+pub struct WasmField<T: Serialize> {
+    /// `contract address` to trigger
+    pub contract: String,
+    /// serialized `ExecuteMsg`
+    pub msg: T,
 }
 
 #[test]

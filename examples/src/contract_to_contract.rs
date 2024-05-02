@@ -1,13 +1,8 @@
 use cosmwasm_std::{to_json_binary, IbcMsg, IbcOrder, IbcTimeout, Timestamp};
-use cw_iper_test::cw_multi_test::{no_init, AppBuilder, ContractWrapper, Executor, MockApiBech32};
 use cw_iper_test::{
-    app_ext::AppExt,
-    contracts::{ContractWrapperExt, IbcClosures, MultiContract},
-    ecosystem::Ecosystem,
-    ibc::{IbcChannelCreator, IbcPort},
-    ibc_app_builder::IbcAppBuilder,
-    ibc_module::IbcModule,
-    stargate::StargateModule,
+    cw_multi_test::{no_init, AppBuilder, ContractWrapper, Executor, MockApiBech32},
+    AppExt, ContractWrapperExt, Ecosystem, IbcChannelCreator, IbcClosures, IbcPort, IperAppBuilder,
+    IperIbcModule, IperStargateModule, MultiContract,
 };
 
 use crate::mock_contracts::counter;
@@ -16,14 +11,14 @@ use crate::mock_contracts::counter;
 fn contract_to_contract() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
-        .with_ibc(IbcModule::default())
-        .with_stargate(StargateModule::default())
+        .with_ibc(IperIbcModule::default())
+        .with_stargate(IperStargateModule::default())
         .build(no_init)
-        .into_ibc_app("terra");
+        .into_iper_app("terra");
 
-    let osmosis = IbcAppBuilder::new("osmo")
+    let osmosis = IperAppBuilder::new("osmo")
         .build(no_init)
-        .into_ibc_app("osmosis");
+        .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
         .add_app(terra.clone())

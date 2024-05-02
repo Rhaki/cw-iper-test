@@ -18,11 +18,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ibc::create_ibc_timeout;
-use crate::ibc_app::InfallibleResult;
 use crate::ibc_application::{IbcApplication, PacketReceiveFailing, PacketReceiveOk};
 use crate::ibc_module::{
     emit_packet_boxed, AckPacket, IbcPacketType, OutgoingPacket, OutgoingPacketRaw, TimeoutPacket,
 };
+use crate::iper_app::InfallibleResult;
 
 use crate::{
     error::AppResult, ibc::IbcChannelWrapper, router::RouterWrapper, stargate::StargateApplication,
@@ -30,6 +30,9 @@ use crate::{
 use prost::Message;
 
 use std::str::FromStr;
+
+use super::WasmField;
+/// Ics20 Application
 #[derive(Default, Clone, IbcPort, Stargate)]
 #[ibc_port = "transfer"]
 #[stargate(name = "ics20", query_urls = Ics20QueryUrls, msgs_urls = Ics20MsgUrls)]
@@ -399,9 +402,13 @@ type IbcDenom = String;
 
 type Trace = String;
 
+/// Helper struct for Ics20
 pub struct Ics20Helper;
 
 impl Ics20Helper {
+    /// Compute a ibc denom by it trace with the following format:
+    ///
+    /// `{channel-id/denom}`
     pub fn compute_ibc_denom_from_trace(trace: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(trace);
@@ -424,15 +431,30 @@ fn test_path() {
     println!("{}", denom);
 }
 
+/// Memo filed of a [`FungibleTokenPacketData`]
 #[derive(Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct MemoField<T: Serialize> {
+    /// [`WasmField`] used by [`IbcHook`](crate::ibc_applications::IbcHook)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wasm: Option<WasmField<T>>,
+
+    /// `ibc_callback` field used by [`IbcHook`](crate::ibc_applications::IbcHook)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ibc_callback: Option<String>,
+
+    /// Extra field not handled
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct WasmField<T: Serialize> {
-    pub contract: String,
-    pub msg: T,
+impl<T: Serialize> MemoField<T> {
+    /// Constructor
+    pub fn new(wasm: Option<WasmField<T>>, ibc_callback: Option<String>) -> Self {
+        Self {
+            wasm,
+            ibc_callback,
+            extra: serde_json::Value::default(),
+        }
+    }
 }

@@ -5,17 +5,13 @@ use cosmwasm_std::{
 use cw_iper_test::cw_multi_test::{
     no_init, AppBuilder, BankSudo, Executor, MockApiBech32, SudoMsg,
 };
+use cw_iper_test::ibc_applications::Ics20;
 use cw_iper_test::ibc_applications::Ics20Helper;
-use cw_iper_test::{
-    app_ext::AppExt as _,
-    ecosystem::Ecosystem,
-    ibc::{IbcChannelCreator, IbcPort},
-    ibc_app_builder::{AppBuilderIbcExt, IbcAppBuilder},
-    ibc_applications::Ics20,
-    ibc_module::IbcModule,
-    stargate::StargateModule,
-};
 
+use cw_iper_test::{
+    AppBuilderIperExt, AppExt, Ecosystem, IbcChannelCreator, IbcPort, IperAppBuilder,
+    IperIbcModule, IperStargateModule,
+};
 use ibc_proto::cosmos::base::v1beta1::Coin as IbcCoin;
 use ibc_proto::ibc::apps::transfer::v1::MsgTransfer;
 
@@ -25,16 +21,16 @@ use prost::Message;
 fn base_ics20_transfer() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
-        .with_ibc(IbcModule::default())
-        .with_stargate(StargateModule::default())
+        .with_ibc(IperIbcModule::default())
+        .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("terra");
+        .into_iper_app("terra");
 
-    let osmosis = IbcAppBuilder::new("osmo")
+    let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("osmosis");
+        .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
         .add_app(terra.clone())
@@ -173,16 +169,16 @@ fn base_ics20_transfer() {
 fn stargate_ics20_transfer() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
-        .with_ibc(IbcModule::default())
-        .with_stargate(StargateModule::default())
+        .with_ibc(IperIbcModule::default())
+        .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("terra");
+        .into_iper_app("terra");
 
-    let osmosis = IbcAppBuilder::new("osmo")
+    let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("osmosis");
+        .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
         .add_app(terra.clone())
@@ -275,16 +271,16 @@ fn stargate_ics20_transfer() {
 fn failing_ics20_transfer() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
-        .with_ibc(IbcModule::default())
-        .with_stargate(StargateModule::default())
+        .with_ibc(IperIbcModule::default())
+        .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("terra");
+        .into_iper_app("terra");
 
-    let osmosis = IbcAppBuilder::new("osmo")
+    let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("osmosis");
+        .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
         .add_app(terra.clone())
@@ -367,16 +363,16 @@ fn failing_ics20_transfer() {
 fn timeout_ics20_transfer() {
     let terra = AppBuilder::new()
         .with_api(MockApiBech32::new("terra"))
-        .with_ibc(IbcModule::default())
-        .with_stargate(StargateModule::default())
+        .with_ibc(IperIbcModule::default())
+        .with_stargate(IperStargateModule::default())
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("terra");
+        .into_iper_app("terra");
 
-    let osmosis = IbcAppBuilder::new("osmo")
+    let osmosis = IperAppBuilder::new("osmo")
         .with_ibc_app(Ics20)
         .build(no_init)
-        .into_ibc_app("osmosis");
+        .into_iper_app("osmosis");
 
     let eco = Ecosystem::default()
         .add_app(terra.clone())
