@@ -1,9 +1,0 @@
-[package]
-name                = "test_imports"
-version             = { workspace = true }
-authors             = { workspace = true }
-edition             = { workspace = true }
-
-[dependencies]
-cw-iper-test        = { workspace  = true }
-cw-iper-test-macros = { workspace  = true, features = []}
