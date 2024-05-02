@@ -2,7 +2,7 @@
 
 [![cw-iper-test on crates.io][crates-badge]][crates-url]
 
-[crates-badge]: https://img.shields.io/crates/v/cw-multi-test.svg
+[crates-badge]: https://img.shields.io/crates/v/cw-iper-test.svg
 [crates-url]: https://crates.io/crates/cw-iper-test
 
 **Testing tools for <u>_ibc_</u> multi-contract interactions**
