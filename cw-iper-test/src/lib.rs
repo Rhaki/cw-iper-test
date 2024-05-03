@@ -20,7 +20,7 @@ mod stargate;
 
 pub use app_ext::AppExt;
 pub use chain_helper::ChainHelper;
-pub use contracts::{ContractWrapperExt, IbcClosures, MultiContract};
+pub use contracts::{ContractWrapperExt, IbcClosures, IperContract};
 pub use ecosystem::Ecosystem;
 pub use ibc::{IbcChannelCreator, IbcPort};
 pub use ibc_application::{

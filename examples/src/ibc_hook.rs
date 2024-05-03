@@ -5,7 +5,7 @@ use cw_iper_test::{
     cw_multi_test::{no_init, BankSudo, ContractWrapper, Executor, SudoMsg},
     ibc_applications::{IbcHook, Ics20, Ics20Helper, MemoField, WasmField},
     AppBuilderIperExt, AppExt, BaseIperApp, ContractWrapperExt, Ecosystem, IbcChannelCreator,
-    IbcPort, IperAppBuilder, MultiContract,
+    IbcPort, IperAppBuilder, IperContract,
 };
 
 use crate::mock_contracts::counter::{self, CounterConfig, CounterQueryMsg};
@@ -33,7 +33,7 @@ fn startup() -> TestIbcHookEnv {
         .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
-    let contract = MultiContract::new(
+    let contract = IperContract::new(
         ContractWrapper::new(counter::execute, counter::instantiate, counter::query)
             .with_sudo(counter::sudo)
             .to_contract(),
@@ -57,7 +57,7 @@ fn startup() -> TestIbcHookEnv {
         )
         .unwrap();
 
-    let contract = MultiContract::new(
+    let contract = IperContract::new(
         ContractWrapper::new(counter::execute, counter::instantiate, counter::query)
             .with_sudo(counter::sudo)
             .to_contract(),

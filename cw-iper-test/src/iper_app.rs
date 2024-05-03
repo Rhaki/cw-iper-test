@@ -14,7 +14,7 @@ use cw_multi_test::{
 use serde::de::DeserializeOwned;
 
 use crate::{
-    contracts::{IbcContract, MultiContract},
+    contracts::{IbcContract, IperContract},
     error::AppResult,
     ibc::{
         Channels, IbcChannelCreator, IbcChannelExt, IbcChannelStatus, IbcChannelWrapper, IbcPort,
@@ -89,7 +89,7 @@ where
     /// This function can be used to store both `non ibc contracts` and `ibc contracts`.
     pub fn store_ibc_code(
         &mut self,
-        contract: MultiContract<CustomT::ExecT, CustomT::QueryT>,
+        contract: IperContract<CustomT::ExecT, CustomT::QueryT>,
     ) -> u64 {
         let code_id = self.app.store_code(contract.base);
         if let Some(ibc) = contract.ibc {

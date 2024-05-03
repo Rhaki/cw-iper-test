@@ -108,7 +108,7 @@ where
 }
 
 /// Wrapper struct to store both default [`Contract`] trait and optional [`IbcContract`] trait
-pub struct MultiContract<C, Q = Empty>
+pub struct IperContract<C, Q = Empty>
 where
     C: CustomMsg,
     Q: CustomQuery,
@@ -119,7 +119,7 @@ where
     pub ibc: Option<Box<dyn IbcContract<C, Q>>>,
 }
 
-impl<C, Q> MultiContract<C, Q>
+impl<C, Q> IperContract<C, Q>
 where
     C: CustomMsg,
     Q: CustomQuery,
@@ -128,7 +128,7 @@ where
     pub fn new(
         base: Box<dyn Contract<C, Q>>,
         ibc: Option<Box<dyn IbcContract<C, Q>>>,
-    ) -> MultiContract<C, Q> {
+    ) -> IperContract<C, Q> {
         Self { base, ibc }
     }
 }

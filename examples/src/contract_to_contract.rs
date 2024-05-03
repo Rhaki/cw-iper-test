@@ -2,7 +2,7 @@ use cosmwasm_std::{to_json_binary, IbcMsg, IbcOrder, IbcTimeout, Timestamp};
 use cw_iper_test::{
     cw_multi_test::{no_init, AppBuilder, ContractWrapper, Executor, MockApiBech32},
     AppExt, ContractWrapperExt, Ecosystem, IbcChannelCreator, IbcClosures, IbcPort, IperAppBuilder,
-    IperIbcModule, IperStargateModule, MultiContract,
+    IperIbcModule, IperStargateModule, IperContract,
 };
 
 use crate::mock_contracts::counter::{self, CounterConfig, CounterPacketData, CounterQueryMsg};
@@ -24,7 +24,7 @@ fn contract_to_contract() {
         .add_app(neutron.clone())
         .add_app(osmosis.clone());
 
-    let contract = MultiContract::new(
+    let contract = IperContract::new(
         ContractWrapper::new(counter::execute, counter::instantiate, counter::query).to_contract(),
         Some(IbcClosures::new_as_ibc_contract(
             counter::ibc_channel_open,
@@ -38,7 +38,7 @@ fn contract_to_contract() {
 
     let code_id_neutron = neutron.borrow_mut().store_ibc_code(contract);
 
-    let contract = MultiContract::new(
+    let contract = IperContract::new(
         ContractWrapper::new(counter::execute, counter::instantiate, counter::query).to_contract(),
         Some(IbcClosures::new_as_ibc_contract(
             counter::ibc_channel_open,
